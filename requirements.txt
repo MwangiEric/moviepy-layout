@@ -1,4 +1,4 @@
 streamlit
 moviepy
 moviepy-layout
-Pillow==9.1.0  # You may want to change this if there's a known issue with a different version
+Pillow==9.5.0
