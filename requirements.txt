@@ -1,2 +1,3 @@
-moviepy
-moviepy-layout
+streamlit==1.14.0
+moviepy==1.0.3
+moviepy-layout==0.1
