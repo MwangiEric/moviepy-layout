@@ -1,4 +1,6 @@
-streamlit
+streamlit==1.39.0
+Pillow==10.4.0
+numpy==1.26.4
+requests==2.32.3
 moviepy==1.0.3
-Pillow==9.5.0
-httpx
+groq==0.9.0
