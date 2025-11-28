@@ -6,43 +6,30 @@ import tempfile
 import os
 import math
 import requests
-import json
-import re
 import gc
 import time
 from moviepy.editor import ImageSequenceClip, AudioFileClip, VideoFileClip
-import groq
 
 # --------------------------------------------------------
 # CONFIGURATION
 # --------------------------------------------------------
 WIDTH, HEIGHT = 1080, 1920
 FPS = 30
+DURATION = 6  # fixed 6 seconds
 TEXT_MAX_Y = 1400
 
 BG_DARK = "#0F0F12"
-ACCENT_COLOR = "#00F0FF"  # Neon cyan for modern look
+ACCENT_COLOR = "#00F0FF"
 TEXT_WHITE = "#FFFFFF"
 
 LOGO_URL = "https://ik.imagekit.io/ericmwangi/smlogo.png?updatedAt=1763071173037".strip()
 AUDIO_URL = "https://ik.imagekit.io/ericmwangi/ambient-piano-112970.mp3?updatedAt=1764101548797".strip()
-FONT_URL = "https://github.com/google/fonts/raw/main/ofl/inter/Inter-Bold.ttf".strip()  # Modern sans-serif
+FONT_URL = "https://github.com/google/fonts/raw/main/ofl/inter/Inter-Bold.ttf".strip()
+VIDEO_BG_URL = "https://ik.imagekit.io/ericmwangi/oceanbg.mp4"  # your ocean background
 
 MODERN_TEMPLATES = ["Glass Morphism", "Neon Pulse", "Minimal Zen"]
-ALL_TEMPLATES = MODERN_TEMPLATES + [
-    "Hexagon Grid", "Golden Waves", "Metallic Curves", "Modern Grid", "Low-Poly"
-]
-
+ALL_TEMPLATES = MODERN_TEMPLATES + ["Golden Waves", "Modern Grid"]
 TEXT_ANIMATIONS = ["Auto", "Typewriter", "Fade-In", "Highlight", "Neon Pulse"]
-
-# Animation mapping
-ANIMATION_MAP = {
-    "Glass Morphism": "fade-in",
-    "Neon Pulse": "neon-pulse",
-    "Minimal Zen": "highlight",
-    "Golden Waves": "smooth-reveal",
-    "Modern Grid": "highlight"
-}
 
 # --------------------------------------------------------
 # UTILITY FUNCTIONS
@@ -58,7 +45,7 @@ def load_font():
         resp = requests.get(FONT_URL, timeout=10)
         if resp.status_code == 200:
             return io.BytesIO(resp.content)
-    except Exception:
+    except:
         pass
     return None
 
@@ -67,16 +54,9 @@ def get_font(size):
     if font_io:
         try:
             return ImageFont.truetype(font_io, size)
-        except Exception:
+        except:
             pass
     return ImageFont.load_default()
-
-@st.cache_resource
-def get_groq_client():
-    if 'groq_key' not in st.secrets:
-        st.error("❌ Add 'groq_key' to Streamlit Secrets")
-        return None
-    return groq.Client(api_key=st.secrets['groq_key'])
 
 @st.cache_resource
 def load_logo():
@@ -87,7 +67,7 @@ def load_logo():
             ratio = min(280 / logo.width, 140 / logo.height)
             new_size = (int(logo.width * ratio), int(logo.height * ratio))
             return logo.resize(new_size, Image.LANCZOS)
-    except Exception:
+    except:
         pass
     fallback = Image.new("RGBA", (280, 140), (0,0,0,0))
     draw = ImageDraw.Draw(fallback)
@@ -103,109 +83,66 @@ def download_audio():
             tmp.write(r.content)
             tmp.close()
             return tmp.name
-    except Exception:
+    except:
         pass
     return None
 
-# --------------------------------------------------------
-# AI QUOTE GENERATION
-# --------------------------------------------------------
-def generate_quote(client, topic):
-    prompt = f"""
-    Generate a short, modern, and inspiring quote about {topic}.
-    Requirements:
-    - Quote: 10–25 words, concise and impactful
-    - Author: Real or plausible name (e.g., "— R. Nakamura")
-    - Caption: <70 chars with 1 emoji
-    - Hashtags: 6 relevant tags
-    Respond ONLY with valid JSON:
-    {{
-        "quote": "Clarity emerges not in noise, but in stillness.",
-        "author": "— Lena Aris",
-        "caption": "Find your quiet. 🧘",
-        "hashtags": "#Mindfulness #Clarity #Stillness"
-    }}
-    """
+@st.cache_data
+def download_video_bg():
     try:
-        chat_completion = client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model="llama-3.1-8b-instant",
-            temperature=0.85,
-            max_tokens=250
-        )
-        resp_text = chat_completion.choices[0].message.content
-        json_match = re.search(r'\{.*\}', resp_text, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group())
-            tags = re.findall(r'#\w+', data.get("hashtags", ""))
-            data["hashtags"] = " ".join(tags[:6])
-            return data
+        r = requests.get(VIDEO_BG_URL, timeout=20, stream=True)
+        if r.status_code == 200:
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+            for chunk in r.iter_content(chunk_size=8192):
+                tmp.write(chunk)
+            tmp.close()
+            return tmp.name
     except Exception as e:
-        st.error(f"AI error: {str(e)}")
+        st.warning(f"Failed to load ocean background: {e}")
     return None
 
-@st.cache_data
-def get_ai_quote(topic: str):
-    client = get_groq_client()
-    if not client:
-        return None
-    return generate_quote(client, topic)
-
 # --------------------------------------------------------
-# MODERN BACKGROUND TEMPLATES
+# BACKGROUND TEMPLATES
 # --------------------------------------------------------
 def create_background(template_name, t=0.0):
     base = Image.new("RGB", (WIDTH, HEIGHT), hex_to_rgb(BG_DARK))
     draw = ImageDraw.Draw(base, "RGBA")
 
     if template_name == "Glass Morphism":
-        # Frosted glass blobs
-        center_x, center_y = WIDTH // 2, HEIGHT // 2
-        for i in range(5):
-            angle = t * 0.5 + i * 1.2
-            cx = center_x + int(300 * math.cos(angle))
-            cy = center_y + int(200 * math.sin(angle * 0.7))
-            radius = 180 + 40 * math.sin(t + i)
-            alpha = int(20 + 15 * math.sin(t * 1.3 + i))
-            draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius],
-                         fill=ACCENT_COLOR + f"{alpha:02x}")
-
+        cx, cy = WIDTH//2, HEIGHT//2
+        for i in range(4):
+            angle = t * 0.6 + i
+            x = cx + int(250 * math.cos(angle))
+            y = cy + int(180 * math.sin(angle * 0.8))
+            r = 160 + 30 * math.sin(t + i)
+            alpha = int(25 + 20 * math.sin(t * 1.2 + i))
+            draw.ellipse([x-r, y-r, x+r, y+r], fill=ACCENT_COLOR + f"{alpha:02x}")
     elif template_name == "Neon Pulse":
-        # Radiating neon rings
-        for i in range(6):
-            radius = 100 + i * 180 + 30 * math.sin(t * 0.8 + i)
-            alpha = int(30 + 25 * abs(math.sin(t * 1.5 + i)))
-            draw.ellipse([WIDTH//2 - radius, HEIGHT//2 - radius,
-                          WIDTH//2 + radius, HEIGHT//2 + radius],
-                         outline=ACCENT_COLOR + f"{alpha:02x}", width=3)
-        # Floating particles
-        for i in range(20):
-            x = int(WIDTH * (0.3 + 0.4 * math.sin(t * 0.4 + i)))
-            y = int(HEIGHT * (0.2 + 0.6 * math.cos(t * 0.3 + i)))
-            size = 4 + 3 * math.sin(t * 0.6 + i)
-            alpha = int(100 + 100 * math.sin(t * 1.2 + i))
-            draw.ellipse([x - size, y - size, x + size, y + size],
-                         fill=ACCENT_COLOR + f"{max(0, min(255, alpha)):02x}")
-
+        for i in range(5):
+            r = 120 + i*160 + 25*math.sin(t*0.9+i)
+            alpha = int(35 + 30 * abs(math.sin(t*1.6+i)))
+            draw.ellipse([WIDTH//2-r, HEIGHT//2-r, WIDTH//2+r, HEIGHT//2+r],
+                         outline=ACCENT_COLOR + f"{alpha:02x}", width=2)
+        for i in range(15):
+            x = int(WIDTH * (0.25 + 0.5 * math.sin(t*0.5+i)))
+            y = int(HEIGHT * (0.2 + 0.6 * math.cos(t*0.4+i)))
+            s = 3 + 2 * math.sin(t*0.7+i)
+            a = int(120 + 100 * math.sin(t*1.1+i))
+            draw.ellipse([x-s, y-s, x+s, y+s], fill=ACCENT_COLOR + f"{max(0,min(255,a)):02x}")
     elif template_name == "Minimal Zen":
-        # Single elegant curve
-        draw.line([(WIDTH//2 - 400, HEIGHT//2), (WIDTH//2 + 400, HEIGHT//2)],
-                  fill=ACCENT_COLOR + "10", width=2)
-        offset = 20 * math.sin(t * 0.7)
-        draw.arc([WIDTH//2 - 300, HEIGHT//2 - 100 + offset,
-                  WIDTH//2 + 300, HEIGHT//2 + 100 + offset],
-                 0, 180, fill=ACCENT_COLOR + "60", width=4)
-
-    # Fallback to original templates if needed
+        draw.line([(WIDTH//2-350, HEIGHT//2), (WIDTH//2+350, HEIGHT//2)], fill=ACCENT_COLOR+"15", width=2)
+        off = 25 * math.sin(t*0.8)
+        draw.arc([WIDTH//2-280, HEIGHT//2-90+off, WIDTH//2+280, HEIGHT//2+90+off], 0, 180, fill=ACCENT_COLOR+"50", width=3)
     else:
-        # Reuse your original create_background logic here for other templates
-        # For brevity, we'll return a solid color
-        pass
-
+        # Fallback grid
+        for x in range(0, WIDTH, 180):
+            draw.line([(x,0), (x,HEIGHT)], fill=ACCENT_COLOR+"08", width=1)
+        for y in range(0, HEIGHT, 180):
+            draw.line([(0,y), (WIDTH,y)], fill=ACCENT_COLOR+"08", width=1)
     return np.array(base)
 
 # --------------------------------------------------------
-# TEXT RENDERING
+# TEXT UTILITIES
 # --------------------------------------------------------
 def split_lines(text, font, max_width):
     words = text.split()
@@ -227,197 +164,142 @@ def fit_font(text, max_width, max_size=80, min_size=40):
             return font
     return get_font(min_size)
 
-def draw_text_overlay(overlay, lines, author, t, text_animation, font_quote, font_author):
+def draw_text_overlay(overlay, lines, author, t, anim_type, font_quote, font_author):
     draw = ImageDraw.Draw(overlay)
-    quote_y = 500
-    line_h = 100
+    y0, line_h = 500, 100
 
-    # Resolve animation
-    if text_animation == "Auto":
-        anim = "highlight"  # default
-    else:
-        anim_map = {
-            "Typewriter": "typewriter",
-            "Fade-In": "fade-in",
-            "Highlight": "highlight",
-            "Neon Pulse": "neon-pulse"
-        }
-        anim = anim_map.get(text_animation, "highlight")
-
+    anim = {"Auto": "highlight"}.get(anim_type, anim_type.lower().replace(" ", "-"))
     if anim == "typewriter":
         full = " ".join(lines)
         chars = min(len(full), int(t * 10))
         displayed = full[:chars]
         wrapped = split_lines(displayed, font_quote, WIDTH - 200)
         for i, line in enumerate(wrapped):
-            draw.text((WIDTH//2, quote_y + i*line_h), line, fill=TEXT_WHITE, font=font_quote, anchor="mm")
-        if t > len(full) / 10 and int(t * 4) % 2:
-            x = WIDTH//2 + (font_quote.getbbox(wrapped[-1] or "A")[2] // 2) + 10
-            y = quote_y + (len(wrapped) - 1) * line_h
+            draw.text((WIDTH//2, y0 + i*line_h), line, fill=TEXT_WHITE, font=font_quote, anchor="mm")
+        if t > len(full)/10 and int(t*4) % 2:
+            x = WIDTH//2 + (font_quote.getbbox(wrapped[-1] or "A")[2]//2) + 10
+            y = y0 + (len(wrapped)-1)*line_h
             draw.line([(x, y-40), (x, y+40)], fill=ACCENT_COLOR, width=2)
-
     elif anim == "fade-in":
         for i, line in enumerate(lines):
             start = i * 0.6
-            alpha = 0 if t < start else min(255, int(255 * (t - start) * 2))
-            if alpha > 0:
-                color = TEXT_WHITE + f"{alpha:02x}"
-                draw.text((WIDTH//2, quote_y + i*line_h), line, fill=color, font=font_quote, anchor="mm")
-
+            alpha = min(255, int(255 * max(0, t - start) * 2)) if t >= start else 0
+            if alpha:
+                draw.text((WIDTH//2, y0 + i*line_h), line, fill=TEXT_WHITE + f"{alpha:02x}", font=font_quote, anchor="mm")
     elif anim == "neon-pulse":
-        glow_color = ACCENT_COLOR + "60"
+        glow = ACCENT_COLOR + "60"
         for i, line in enumerate(lines):
-            y = quote_y + i * line_h
-            # Glow
-            for dx, dy in [(-2,-2), (2,2), (-2,2), (2,-2)]:
-                draw.text((WIDTH//2 + dx, y + dy), line, fill=glow_color, font=font_quote, anchor="mm")
-            # Main text with pulse
-            pulse = 0.7 + 0.3 * math.sin(t * 4 + i)
-            alpha = int(255 * pulse)
+            y = y0 + i*line_h
+            for dx,dy in [(-2,-2),(2,2),(-2,2),(2,-2)]:
+                draw.text((WIDTH//2+dx, y+dy), line, fill=glow, font=font_quote, anchor="mm")
+            alpha = int(255 * (0.7 + 0.3 * math.sin(t*4 + i)))
             draw.text((WIDTH//2, y), line, fill=TEXT_WHITE + f"{alpha:02x}", font=font_quote, anchor="mm")
-
     else:  # highlight
         for i, line in enumerate(lines):
-            y = quote_y + i * line_h
+            y = y0 + i*line_h
             words = line.split()
             for j, word in enumerate(words):
-                word_t = i * 0.8 + j * 0.2
+                word_t = i*0.8 + j*0.2
                 if word_t <= t < word_t + 0.2:
                     prefix = " ".join(words[:j])
                     px = font_quote.getbbox(prefix + " ")[2] if prefix else 0
                     lx = font_quote.getbbox(line)[2]
                     x0 = WIDTH//2 - lx//2 + px
-                    w_bbox = font_quote.getbbox(word)
-                    draw.rectangle([x0-5, y+w_bbox[1]-5, x0+w_bbox[2]-w_bbox[0]+5, y+w_bbox[3]+5],
-                                   fill=ACCENT_COLOR + "30")
+                    wb = font_quote.getbbox(word)
+                    draw.rectangle([x0-5, y+wb[1]-5, x0+wb[2]-wb[0]+5, y+wb[3]+5], fill=ACCENT_COLOR+"30")
                     break
             draw.text((WIDTH//2, y), line, fill=TEXT_WHITE, font=font_quote, anchor="mm")
 
-    if author and (t > 1.0 or anim not in ["typewriter"]):
-        draw.text((WIDTH//2, quote_y + len(lines)*line_h + 50), author,
-                  fill=ACCENT_COLOR, font=font_author, anchor="mm")
-
-    draw.text((WIDTH//2, HEIGHT - 180), "Save this wisdom ✨",
-              fill=ACCENT_COLOR, font=get_font(50), anchor="mm")
+    if author and (t > 1.2 or anim != "typewriter"):
+        draw.text((WIDTH//2, y0 + len(lines)*line_h + 50), author, fill=ACCENT_COLOR, font=font_author, anchor="mm")
+    draw.text((WIDTH//2, HEIGHT - 180), "Save this wisdom ✨", fill=ACCENT_COLOR, font=get_font(50), anchor="mm")
 
 # --------------------------------------------------------
-# FRAME GENERATION
+# FRAME & VIDEO HANDLING
 # --------------------------------------------------------
-def render_frame(t, lines, author, logo, font_quote, font_author, template, text_animation, bg_array=None):
+def render_frame(t, lines, author, logo, font_q, font_a, template, anim, bg_array=None):
     if bg_array is None:
         bg_array = create_background(template, t)
     overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0,0,0,0))
-    if logo:
-        overlay.paste(logo, (70, 60), logo)
-    draw_text_overlay(overlay, lines, author, t, text_animation, font_quote, font_author)
-    
+    if logo: overlay.paste(logo, (70, 60), logo)
+    draw_text_overlay(overlay, lines, author, t, anim, font_q, font_a)
     fg = np.array(overlay)[:, :, :3]
     alpha = np.array(overlay)[:, :, 3:] / 255.0
     return (bg_array * (1 - alpha) + fg * alpha).astype(np.uint8)
 
-def get_video_background_frame(clip, t):
-    if t >= clip.duration:
-        t = clip.duration - 0.01
+def get_video_frame(clip, t):
+    if t >= clip.duration: t = clip.duration - 0.01
     frame = clip.get_frame(t)
     img = Image.fromarray(frame).convert("RGB")
     w, h = img.size
-    target_w, target_h = WIDTH, HEIGHT
-    if w / h > target_w / target_h:
-        new_w = int(h * target_w / target_h)
+    if w / h > WIDTH / HEIGHT:
+        new_w = int(h * WIDTH / HEIGHT)
         left = (w - new_w) // 2
         img = img.crop((left, 0, left + new_w, h))
     else:
-        new_h = int(w * target_h / target_w)
+        new_h = int(w * HEIGHT / WIDTH)
         top = (h - new_h) // 2
         img = img.crop((0, top, w, top + new_h))
-    img = img.resize((target_w, target_h), Image.LANCZOS)
-    return np.array(img)
+    return np.array(img.resize((WIDTH, HEIGHT), Image.LANCZOS))
 
 # --------------------------------------------------------
 # STREAMLIT APP
 # --------------------------------------------------------
-st.set_page_config(page_title="Modern Quote Reels", layout="wide", page_icon="✨")
-st.title("✨ Modern Quote Reels")
-st.caption("Minimal • Neon • Glassmorphism • Video Backgrounds")
+st.set_page_config(page_title="Ocean Quote Reels", layout="wide", page_icon="🌊")
+st.title("🌊 Ocean Quote Reels (Free Mode)")
+st.caption("Test with your ocean background • No AI • 6-second videos")
 
+# Free text inputs
 col1, col2 = st.columns(2)
 with col1:
-    topic = st.text_input("Quote Theme", "digital minimalism")
+    quote = st.text_area("Your Quote", "The ocean stirs the heart, inspires the imagination.", height=100)
 with col2:
-    use_modern = st.checkbox("Use modern templates only", True)
-    templates = MODERN_TEMPLATES if use_modern else ALL_TEMPLATES
-    template = st.selectbox("🎨 Template", templates)
+    author = st.text_input("Author", "— Anonymous")
 
-col3, col4 = st.columns(2)
-with col3:
-    anim = st.selectbox("🔤 Text Animation", TEXT_ANIMATIONS)
-with col4:
-    duration = st.slider("⏱️ Duration (sec)", 5, 10, 7)
+template = st.selectbox("🎨 Background Style", ALL_TEMPLATES)
+anim = st.selectbox("🔤 Text Animation", TEXT_ANIMATIONS)
 
-st.markdown("### 🎥 Optional Video Background (9:16 .mp4)")
-video_upload = st.file_uploader("Upload video", type=["mp4"])
+use_ocean_bg = st.checkbox("🌊 Use ocean video background", value=True)
 
-if st.button("✨ Generate Quote", use_container_width=True):
-    with st.spinner("Generating..."):
-        content = get_ai_quote(topic)
-        if content:
-            st.session_state.content = content
-            st.session_state.config = {
-                "template": template,
-                "animation": anim,
-                "duration": duration,
-                "video": video_upload
-            }
-        else:
-            st.error("Failed to generate quote.")
+if st.button("🚀 Generate 6-Second Video", type="primary", use_container_width=True):
+    if not quote.strip():
+        st.error("Please enter a quote.")
+    else:
+        with st.spinner("Rendering your 6-second video... (30-50 sec)"):
+            logo = load_logo()
+            font_q = fit_font(quote, WIDTH - 200)
+            font_a = get_font(50)
+            lines = split_lines(quote, font_q, WIDTH - 200)
 
-if 'content' in st.session_state:
-    content = st.session_state.content
-    config = st.session_state.config
-
-    st.subheader("✏️ Edit")
-    quote = st.text_area("Quote", content["quote"], max_chars=200)
-    author = st.text_input("Author", content["author"])
-    st.text_area("Hashtags", content["hashtags"], disabled=True)
-
-    st.subheader("📱 Preview")
-    logo = load_logo()
-    font_q = fit_font(quote, WIDTH - 200)
-    font_a = get_font(50)
-    lines = split_lines(quote, font_q, WIDTH - 200)
-    preview = render_frame(2.0, lines, author, logo, font_q, font_a, config["template"], config["animation"])
-    st.image(preview, width=320)
-
-    if st.button("🚀 Export", type="primary", use_container_width=True):
-        with st.spinner("Rendering..."):
-            total_frames = FPS * config["duration"]
-            frames = []
+            # Load ocean background if selected
             video_clip = None
+            if use_ocean_bg:
+                vid_path = download_video_bg()
+                if vid_path:
+                    try:
+                        video_clip = VideoFileClip(vid_path)
+                        if video_clip.duration < DURATION:
+                            video_clip = video_clip.loop(duration=DURATION)
+                        else:
+                            video_clip = video_clip.subclip(0, DURATION)
+                    except Exception as e:
+                        st.warning(f"Video load failed: {e}")
+                        video_clip = None
 
-            # Handle video background
-            if config["video"]:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
-                    tmp.write(config["video"].getvalue())
-                    tmp.flush()
-                    video_clip = VideoFileClip(tmp.name)
-                    if video_clip.duration < config["duration"]:
-                        video_clip = video_clip.loop(duration=config["duration"])
-                    else:
-                        video_clip = video_clip.subclip(0, config["duration"])
-
+            # Render frames
+            frames = []
+            total_frames = FPS * DURATION
             for i in range(total_frames):
                 t = i / FPS
-                if video_clip:
-                    bg = get_video_background_frame(video_clip, t)
-                    frame = render_frame(t, lines, author, logo, font_q, font_a,
-                                       config["template"], config["animation"], bg_array=bg)
+                if video_clip is not None:
+                    bg = get_video_frame(video_clip, t)
+                    frame = render_frame(t, lines, author, logo, font_q, font_a, template, anim, bg_array=bg)
                 else:
-                    frame = render_frame(t, lines, author, logo, font_q, font_a,
-                                       config["template"], config["animation"])
+                    frame = render_frame(t, lines, author, logo, font_q, font_a, template, anim)
                 frames.append(frame)
 
             # Export
-            out_path = os.path.join(tempfile.gettempdir(), f"quote_{int(time.time())}.mp4")
+            out_path = os.path.join(tempfile.gettempdir(), f"ocean_quote_{int(time.time())}.mp4")
             audio = download_audio()
             clip = ImageSequenceClip(frames, fps=FPS)
             if audio:
@@ -428,9 +310,9 @@ if 'content' in st.session_state:
                     pass
             clip.write_videofile(out_path, codec="libx264", audio_codec="aac", logger=None, threads=4)
 
-            st.success("✅ Done!")
+            st.success("✅ Your 6-second ocean quote video is ready!")
             with open(out_path, "rb") as f:
-                st.download_button("⬇️ Download Video", f, "Modern_Quote.mp4", "video/mp4")
+                st.download_button("⬇️ Download Video", f, "Ocean_Quote.mp4", "video/mp4", use_container_width=True)
             st.video(out_path)
 
             clip.close()
