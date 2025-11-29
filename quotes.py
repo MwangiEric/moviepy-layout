@@ -8,42 +8,35 @@ import math
 import requests
 import gc
 import time
-import re  # <-- added for regex
-from moviepy.editor import ImageSequenceClip, AudioFileClip, VideoFileClip
+from moviepy.editor import VideoFileClip
+from moviepy.video.io.ffmpeg_reader import FFMPEG_VideoReader
 
 # --------------------------------------------------------
-# CONFIGURATION
+# CONFIG
 # --------------------------------------------------------
 WIDTH, HEIGHT = 1080, 1920
 FPS = 30
 DURATION = 6
-TEXT_MAX_Y = 1300
+TEXT_BG_COLOR = (0, 0, 0, 180)  # Semi-transparent black
 
-BG_DARK = "#0F0F12"
-ACCENT_COLOR = "#00F0FF"
-TEXT_WHITE = "#FFFFFF"
-
-LOGO_URL = "https://ik.imagekit.io/ericmwangi/smlogo.png?updatedAt=1763071173037".strip()
-AUDIO_URL = "https://ik.imagekit.io/ericmwangi/ambient-piano-112970.mp3?updatedAt=1764101548797".strip()
-FONT_URL = "https://github.com/google/fonts/raw/main/ofl/inter/Inter-Bold.ttf".strip()
-VIDEO_BG_URL = "https://ik.imagekit.io/ericmwangi/oceanbg.mp4"
-
-MODERN_TEMPLATES = ["Glass Morphism", "Neon Pulse", "Minimal Zen"]
-ALL_TEMPLATES = MODERN_TEMPLATES + ["Golden Waves", "Modern Grid"]
-TEXT_ANIMATIONS = ["Auto", "Typewriter", "Fade-In", "Highlight", "Neon Pulse"]
+# Royalty-free backgrounds (Pixabay: free for commercial use)
+BACKGROUND_VIDEOS = {
+    "Ocean Waves": "https://ik.imagekit.io/ericmwangi/oceanbg.mp4",
+    "Floating Clouds": "https://cdn.pixabay.com/video/2023/06/15/164555-806155701_large.mp4",
+    "Misty Forest": "https://cdn.pixabay.com/video/2022/01/27/105839-710637991_large.mp4",
+    "Gentle Fire": "https://cdn.pixabay.com/video/2022/02/15/110845-717522810_large.mp4",
+    "Waterfall": "https://cdn.pixabay.com/video/2023/05/01/162303-799296582_large.mp4",
+    "Starry Sky": "https://cdn.pixabay.com/video/2022/07/26/115453-752008984_large.mp4",
+}
+TEMPLATES = ["Glass Morphism", "Neon Pulse", "Minimal Zen", "Golden Waves", "Modern Grid"]
 
 # --------------------------------------------------------
-# CACHED ASSET LOADERS
+# CACHED LOADERS
 # --------------------------------------------------------
-@st.cache_resource
-def hex_to_rgb(h):
-    h = h.lstrip('#')
-    return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
-
 @st.cache_resource
 def load_font():
     try:
-        resp = requests.get(FONT_URL, timeout=10)
+        resp = requests.get("https://github.com/google/fonts/raw/main/ofl/inter/Inter-Bold.ttf", timeout=10)
         if resp.status_code == 200:
             return io.BytesIO(resp.content)
     except:
@@ -62,270 +55,253 @@ def get_font(size):
 @st.cache_resource
 def load_logo():
     try:
-        resp = requests.get(LOGO_URL, timeout=10)
+        resp = requests.get("https://ik.imagekit.io/ericmwangi/smlogo.png?updatedAt=1763071173037", timeout=10)
         if resp.status_code == 200:
             logo = Image.open(io.BytesIO(resp.content)).convert("RGBA")
             ratio = min(280 / logo.width, 140 / logo.height)
-            new_size = (int(logo.width * ratio), int(logo.height * ratio))
-            return logo.resize(new_size, Image.LANCZOS)
+            return logo.resize((int(logo.width * ratio), int(logo.height * ratio)), Image.LANCZOS)
     except:
         pass
-    fallback = Image.new("RGBA", (280, 140), (0,0,0,0))
-    draw = ImageDraw.Draw(fallback)
-    draw.text((20, 25), "SM", fill=ACCENT_COLOR, font=get_font(80))
-    return fallback
+    img = Image.new("RGBA", (280, 140), (0,0,0,0))
+    draw = ImageDraw.Draw(img)
+    draw.text((20, 25), "SM", fill="#00F0FF", font=get_font(80))
+    return img
 
-@st.cache_data
-def download_audio():
+@st.cache_data(ttl=3600)
+def download_asset(url, suffix):
     try:
-        r = requests.get(AUDIO_URL, timeout=15)
+        r = requests.get(url, timeout=20)
         if r.status_code == 200:
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-            tmp.write(r.content)
-            tmp.close()
-            return tmp.name
-    except:
-        pass
-    return None
-
-@st.cache_data
-def download_video_bg():
-    try:
-        r = requests.get(VIDEO_BG_URL, timeout=20)
-        if r.status_code == 200:
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
             tmp.write(r.content)
             tmp.close()
             return tmp.name
     except Exception as e:
-        st.warning(f"Ocean background load failed: {e}")
+        st.sidebar.error(f"Load failed: {str(e)[:50]}")
     return None
 
 # --------------------------------------------------------
-# TEXT & LAYOUT UTILITIES
+# RENDER ENGINE (SHARED BY PREVIEW & EXPORT)
 # --------------------------------------------------------
 def split_lines(text, font, max_width):
     words = text.split()
-    if not words:
-        return [""]
+    if not words: return [""]
     lines, current = [], []
     for word in words:
         test = ' '.join(current + [word])
-        bbox = font.getbbox(test)
-        if bbox[2] - bbox[0] <= max_width:
+        w = font.getbbox(test)[2] - font.getbbox(test)[0]
+        if w <= max_width:
             current.append(word)
         else:
-            if current:
-                lines.append(' '.join(current))
+            if current: lines.append(' '.join(current))
             current = [word]
-    if current:
-        lines.append(' '.join(current))
+    if current: lines.append(' '.join(current))
     return lines
 
-# --------------------------------------------------------
-# BACKGROUND & RENDERING
-# --------------------------------------------------------
-def create_background(template_name, t=0.0):
-    base = Image.new("RGB", (WIDTH, HEIGHT), hex_to_rgb(BG_DARK))
+def create_animated_bg(template, t):
+    base = Image.new("RGB", (WIDTH, HEIGHT), (15, 15, 18))
     draw = ImageDraw.Draw(base, "RGBA")
-    if template_name == "Glass Morphism":
-        cx, cy = WIDTH // 2, HEIGHT // 2
+    if template == "Glass Morphism":
+        cx, cy = WIDTH//2, HEIGHT//2
         for i in range(4):
-            angle = t * 0.6 + i
+            angle = t*0.6 + i
             x = cx + int(250 * math.cos(angle))
-            y = cy + int(180 * math.sin(angle * 0.8))
-            r = 160 + 30 * math.sin(t + i)
-            alpha = int(25 + 20 * math.sin(t * 1.2 + i))
-            draw.ellipse([x - r, y - r, x + r, y + r], fill=ACCENT_COLOR + f"{alpha:02x}")
-    elif template_name == "Neon Pulse":
+            y = cy + int(180 * math.sin(angle*0.8))
+            r = 160 + 30*math.sin(t+i)
+            a = int(25 + 20*math.sin(t*1.2+i))
+            draw.ellipse([x-r,y-r,x+r,y+r], fill="#00F0FF"+f"{a:02x}")
+    elif template == "Neon Pulse":
         for i in range(5):
-            r = 120 + i * 160 + 25 * math.sin(t * 0.9 + i)
-            alpha = int(35 + 30 * abs(math.sin(t * 1.6 + i)))
-            draw.ellipse([WIDTH//2 - r, HEIGHT//2 - r, WIDTH//2 + r, HEIGHT//2 + r],
-                         outline=ACCENT_COLOR + f"{alpha:02x}", width=2)
+            r = 120 + i*160 + 25*math.sin(t*0.9+i)
+            a = int(35 + 30*abs(math.sin(t*1.6+i)))
+            draw.ellipse([WIDTH//2-r,HEIGHT//2-r,WIDTH//2+r,HEIGHT//2+r], outline="#00F0FF"+f"{a:02x}", width=2)
         for i in range(15):
-            x = int(WIDTH * (0.25 + 0.5 * math.sin(t * 0.5 + i)))
-            y = int(HEIGHT * (0.2 + 0.6 * math.cos(t * 0.4 + i)))
-            s = 3 + 2 * math.sin(t * 0.7 + i)
-            a = int(120 + 100 * math.sin(t * 1.1 + i))
-            draw.ellipse([x - s, y - s, x + s, y + s], fill=ACCENT_COLOR + f"{max(0, min(255, a)):02x}")
-    elif template_name == "Minimal Zen":
-        draw.line([(WIDTH//2 - 350, HEIGHT//2), (WIDTH//2 + 350, HEIGHT//2)], fill=ACCENT_COLOR + "15", width=2)
-        off = 25 * math.sin(t * 0.8)
-        draw.arc([WIDTH//2 - 280, HEIGHT//2 - 90 + off, WIDTH//2 + 280, HEIGHT//2 + 90 + off],
-                 0, 180, fill=ACCENT_COLOR + "50", width=3)
+            x = int(WIDTH*(0.25+0.5*math.sin(t*0.5+i)))
+            y = int(HEIGHT*(0.2+0.6*math.cos(t*0.4+i)))
+            s = 3 + 2*math.sin(t*0.7+i)
+            a = int(120 + 100*math.sin(t*1.1+i))
+            draw.ellipse([x-s,y-s,x+s,y+s], fill="#00F0FF"+f"{max(0,min(255,a)):02x}")
     else:
-        for x in range(0, WIDTH, 180):
-            draw.line([(x, 0), (x, HEIGHT)], fill=ACCENT_COLOR + "08", width=1)
-        for y in range(0, HEIGHT, 180):
-            draw.line([(0, y), (WIDTH, y)], fill=ACCENT_COLOR + "08", width=1)
+        step = 180 if template == "Modern Grid" else 200
+        for x in range(0, WIDTH, step):
+            draw.line([(x,0),(x,HEIGHT)], fill="#00F0FF"+"08", width=1)
+        for y in range(0, HEIGHT, step):
+            draw.line([(0,y),(WIDTH,y)], fill="#00F0FF"+"08", width=1)
     return np.array(base)
 
-def draw_text_overlay(overlay, lines, author, t, anim_type, font_quote, font_author, y_offset=480):
-    draw = ImageDraw.Draw(overlay)
-    line_h = 110
-    y0 = y_offset  # controlled by slider
+def draw_quote(draw, lines, y0, font_q, font_a, author, show_bg):
+    line_h = int(font_q.size * 1.25)
+    # Measure boxes
+    boxes = []
+    for i, line in enumerate(lines):
+        y = y0 + i * line_h
+        left, top, right, bottom = font_q.getbbox(line)
+        w, h = right - left, bottom - top
+        x = WIDTH // 2 - w // 2
+        boxes.append((x - 20, y - h - 10, x + w + 20, y + 10))
+    # Draw background
+    if show_bg:
+        for box in boxes:
+            draw.rectangle(box, fill=TEXT_BG_COLOR)
+    # Draw text
+    for i, line in enumerate(lines):
+        y = y0 + i * line_h
+        draw.text((WIDTH//2, y), line, fill="#FFFFFF", font=font_q, anchor="mm")
+    if author:
+        draw.text((WIDTH//2, y0 + len(lines)*line_h + 50), author, fill="#00F0FF", font=font_a, anchor="mm")
+    draw.text((WIDTH//2, HEIGHT - 180), "Save this wisdom ✨", fill="#00F0FF", font=get_font(50), anchor="mm")
 
-    anim = {"Auto": "highlight"}.get(anim_type, anim_type.lower().replace(" ", "-"))
-    if anim == "typewriter":
-        full = " ".join(lines)
-        chars = min(len(full), int(t * 10))
-        displayed = full[:chars]
-        wrapped = split_lines(displayed, font_quote, WIDTH - 200)
-        for i, line in enumerate(wrapped):
-            draw.text((WIDTH//2, y0 + i * line_h), line, fill=TEXT_WHITE, font=font_quote, anchor="mm")
-        if t > len(full) / 10 and int(t * 4) % 2:
-            x = WIDTH//2 + (font_quote.getbbox(wrapped[-1] or "A")[2] // 2) + 10
-            y = y0 + (len(wrapped) - 1) * line_h
-            draw.line([(x, y - 40), (x, y + 40)], fill=ACCENT_COLOR, width=2)
-    elif anim == "fade-in":
-        for i, line in enumerate(lines):
-            start = i * 0.6
-            alpha = min(255, int(255 * max(0, t - start) * 2)) if t >= start else 0
-            if alpha > 0:
-                draw.text((WIDTH//2, y0 + i * line_h), line, fill=TEXT_WHITE + f"{alpha:02x}", font=font_quote, anchor="mm")
-    elif anim == "neon-pulse":
-        glow = ACCENT_COLOR + "60"
-        for i, line in enumerate(lines):
-            y = y0 + i * line_h
-            for dx, dy in [(-2, -2), (2, 2), (-2, 2), (2, -2)]:
-                draw.text((WIDTH//2 + dx, y + dy), line, fill=glow, font=font_quote, anchor="mm")
-            pulse = 0.7 + 0.3 * math.sin(t * 4 + i)
-            alpha = int(255 * pulse)
-            draw.text((WIDTH//2, y), line, fill=TEXT_WHITE + f"{alpha:02x}", font=font_quote, anchor="mm")
-    else:  # highlight
-        for i, line in enumerate(lines):
-            y = y0 + i * line_h
-            words = line.split()
-            for j, word in enumerate(words):
-                word_t = i * 0.8 + j * 0.2
-                if word_t <= t < word_t + 0.2:
-                    prefix = " ".join(words[:j])
-                    px = font_quote.getbbox(prefix + " ")[2] if prefix else 0
-                    lx = font_quote.getbbox(line)[2]
-                    x0 = WIDTH//2 - lx//2 + px
-                    wb = font_quote.getbbox(word)
-                    draw.rectangle([x0 - 6, y + wb[1] - 6, x0 + wb[2] - wb[0] + 6, y + wb[3] + 6],
-                                   fill=ACCENT_COLOR + "35")
-                    break
-            draw.text((WIDTH//2, y), line, fill=TEXT_WHITE, font=font_quote, anchor="mm")
-    if author and (t > 1.2 or anim != "typewriter"):
-        draw.text((WIDTH//2, y0 + len(lines) * line_h + 50), author, fill=ACCENT_COLOR, font=font_author, anchor="mm")
-    draw.text((WIDTH//2, HEIGHT - 180), "Save this wisdom ✨", fill=ACCENT_COLOR, font=get_font(50), anchor="mm")
-
-def render_frame(t, lines, author, logo, font_q, font_a, template, anim, y_offset, bg_array=None):
+def render_frame(t, quote, author, font_size, y_offset, show_bg, bg_type, bg_ident, logo, bg_array=None):
+    # Background
     if bg_array is None:
-        bg_array = create_background(template, t)
-    overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+        if bg_type == "video":
+            # This shouldn't happen in preview — video bg handled externally
+            bg_array = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
+        else:
+            bg_array = create_animated_bg(bg_ident, t)
+    
+    # Overlay
+    overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0,0,0,0))
     if logo:
         overlay.paste(logo, (70, 60), logo)
-    draw_text_overlay(overlay, lines, author, t, anim, font_q, font_a, y_offset)
+    draw = ImageDraw.Draw(overlay)
+    
+    font_q = get_font(max(60, font_size))
+    font_a = get_font(max(40, int(font_q.size * 0.65)))
+    lines = split_lines(quote, font_q, WIDTH - 200)
+    
+    draw_quote(draw, lines, y_offset, font_q, font_a, author, show_bg)
+    
+    # Composite
     fg = np.array(overlay)[:, :, :3]
     alpha = np.array(overlay)[:, :, 3:] / 255.0
     return (bg_array * (1 - alpha) + fg * alpha).astype(np.uint8)
 
-def get_video_frame(clip, t):
-    if t >= clip.duration:
-        t = clip.duration - 0.01
-    frame = clip.get_frame(t)
-    img = Image.fromarray(frame).convert("RGB")
-    w, h = img.size
-    if w / h > WIDTH / HEIGHT:
-        new_w = int(h * WIDTH / HEIGHT)
-        left = (w - new_w) // 2
-        img = img.crop((left, 0, left + new_w, h))
+def extract_video_frame(video_path, t=0.0):
+    """Extract exact frame at time t"""
+    try:
+        with VideoFileClip(video_path) as clip:
+            if t >= clip.duration:
+                t = clip.duration - 0.01
+            frame = clip.get_frame(t)
+            img = Image.fromarray(frame).convert("RGB")
+            w, h = img.size
+            if w / h > WIDTH / HEIGHT:
+                new_w = int(h * WIDTH / HEIGHT)
+                left = (w - new_w) // 2
+                img = img.crop((left, 0, left + new_w, h))
+            else:
+                new_h = int(w * HEIGHT / WIDTH)
+                top = (h - new_h) // 2
+                img = img.crop((0, top, w, top + new_h))
+            return np.array(img.resize((WIDTH, HEIGHT), Image.LANCZOS))
+    except Exception as e:
+        st.error(f"Frame extract failed: {e}")
+        return np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
+
+# --------------------------------------------------------
+# UI
+# --------------------------------------------------------
+st.set_page_config(page_title="WYSIWYG Quote Studio", layout="wide")
+with st.sidebar:
+    st.image("https://ik.imagekit.io/ericmwangi/smlogo.png?updatedAt=1763071173037", width=120)
+    st.title("✨ WYSIWYG Studio")
+    
+    quote = st.text_area("Your Quote", "Breathe. It's just a bad day, not a bad life.", height=100)
+    author = st.text_input("Author", "— Anonymous")
+    
+    st.markdown("### 🎨 Text Style")
+    font_size = st.slider("Font Size", 60, 130, 85, step=1)
+    y_offset = st.slider("Vertical Position", 350, 850, 520, step=5)
+    show_bg = st.checkbox("Text Background", value=True)
+    
+    st.markdown("### 🖼️ Background")
+    bg_mode = st.radio("Type", ["Online Video", "Animated Template"])
+    if bg_mode == "Online Video":
+        bg_name = st.selectbox("Video", list(BACKGROUND_VIDEOS.keys()))
+        video_url = BACKGROUND_VIDEOS[bg_name]
     else:
-        new_h = int(w * HEIGHT / WIDTH)
-        top = (h - new_h) // 2
-        img = img.crop((0, top, w, top + new_h))
-    return np.array(img.resize((WIDTH, HEIGHT), Image.LANCZOS))
-
-def render_preview_frame(quote, author, template, anim, font_size, y_offset):
-    logo = load_logo()
-    font_q = get_font(font_size)
-    font_a = get_font(max(40, int(font_size * 0.65)))
-    lines = split_lines(quote, font_q, WIDTH - 200)
-    t = 1.5
-    if anim == "Typewriter":
-        t = min(2.5, max(1.0, len(quote) / 8))
-    elif anim == "Neon Pulse":
-        t = 0.8
-    return render_frame(t, lines, author, logo, font_q, font_a, template, anim, y_offset)
+        template = st.selectbox("Template", TEMPLATES)
+        video_url = None
+    
+    export = st.button("🚀 Export 6s Video", type="primary", use_container_width=True)
 
 # --------------------------------------------------------
-# STREAMLIT APP
+# TRUE WYSIWYG PREVIEW (t=0.0 — same as video start)
 # --------------------------------------------------------
-st.set_page_config(page_title="Ocean Quote Reels", layout="wide", page_icon="🌊")
-st.title("🌊 Ocean Quote Reels")
-st.caption("Customize text size & position → Preview → Export 6s video")
+logo = load_logo()
+use_video = (bg_mode == "Online Video")
 
-col1, col2 = st.columns(2)
-with col1:
-    quote = st.text_area("Your Quote", "The ocean whispers secrets to those who listen.", height=120, max_chars=200)
-with col2:
-    author = st.text_input("Author", "— Anonymous", max_chars=50)
+# Get background frame at t=0.0
+if use_video:
+    vid_path = download_asset(video_url, ".mp4")
+    if vid_path:
+        bg_frame = extract_video_frame(vid_path, t=0.0)
+        bg_type_for_render = "video"
+        bg_ident_for_render = None
+    else:
+        bg_frame = create_animated_bg("Minimal Zen", 0.0)
+        bg_type_for_render = "template"
+        bg_ident_for_render = "Minimal Zen"
+else:
+    bg_frame = create_animated_bg(template, 0.0)
+    bg_type_for_render = "template"
+    bg_ident_for_render = template
 
-col3, col4 = st.columns(2)
-with col3:
-    template = st.selectbox("🎨 Background Style", ALL_TEMPLATES)
-with col4:
-    anim = st.selectbox("🔤 Text Animation", TEXT_ANIMATIONS)
+# Render EXACT same function used in export
+preview_frame = render_frame(
+    t=0.0,  # ← Key: matches first video frame
+    quote=quote,
+    author=author,
+    font_size=font_size,
+    y_offset=y_offset,
+    show_bg=show_bg,
+    bg_type=bg_type_for_render,
+    bg_ident=bg_ident_for_render,
+    logo=logo,
+    bg_array=bg_frame
+)
 
-# ===== TEXT CONTROLS =====
-st.markdown("### ✏️ Text Customization")
-col5, col6 = st.columns(2)
-with col5:
-    font_size = st.slider("🔤 Font Size", min_value=40, max_value=120, value=80, step=2)
-with col6:
-    y_offset = st.slider("↕️ Vertical Position", min_value=300, max_value=900, value=480, step=10)
+st.title("✨ WYSIWYG Quote Studio")
+st.caption("Preview = First frame of your video. What you see is what you get.")
+st.image(preview_frame, channels="RGB", width=360, caption="✅ Exact frame 0 of your video")
 
-use_ocean_bg = st.checkbox("🌊 Use ocean video background", value=True)
-
-# ===== LIVE PREVIEW =====
-st.markdown("### 👁️ Live Preview")
-try:
-    preview_img = render_preview_frame(quote, author, template, anim, font_size, y_offset)
-    st.image(preview_img, width=320)
-except Exception as e:
-    st.error("Preview error. Check inputs.")
-
-# ===== EXPORT =====
-if st.button("🚀 Export 6-Second Video", type="primary", use_container_width=True):
+# --------------------------------------------------------
+# EXPORT (uses same render_frame for all frames)
+# --------------------------------------------------------
+if export:
     if not quote.strip():
-        st.error("Please enter a quote.")
+        st.error("Add a quote!")
     else:
-        with st.spinner("Rendering your 6-second video... (30–50 sec)"):
-            logo = load_logo()
-            font_q = get_font(font_size)
-            font_a = get_font(max(40, int(font_size * 0.65)))
-            lines = split_lines(quote, font_q, WIDTH - 200)
-
+        with st.spinner(".Rendering video (30-50 sec)..."):
+            # Prepare background clip if video
             video_clip = None
-            if use_ocean_bg:
-                vid_path = download_video_bg()
-                if vid_path:
-                    try:
-                        video_clip = VideoFileClip(vid_path)
-                        if video_clip.duration < DURATION:
-                            video_clip = video_clip.loop(duration=DURATION)
-                        else:
-                            video_clip = video_clip.subclip(0, DURATION)
-                    except Exception as e:
-                        st.warning("Using animated background instead.")
-
+            if use_video and vid_path:
+                try:
+                    video_clip = VideoFileClip(vid_path)
+                    if video_clip.duration < DURATION:
+                        video_clip = video_clip.loop(duration=DURATION)
+                    else:
+                        video_clip = video_clip.subclip(0, DURATION)
+                except:
+                    video_clip = None
+            
+            # Render all frames
             frames = []
-            total_frames = FPS * DURATION
-            for i in range(total_frames):
+            total = FPS * DURATION
+            for i in range(total):
                 t = i / FPS
                 if video_clip is not None:
-                    bg = get_video_frame(video_clip, t)
-                    frame = render_frame(t, lines, author, logo, font_q, font_a, template, anim, y_offset, bg_array=bg)
+                    bg_arr = extract_video_frame(vid_path, t)
+                    frame = render_frame(t, quote, author, font_size, y_offset, show_bg, "video", None, logo, bg_arr)
                 else:
-                    frame = render_frame(t, lines, author, logo, font_q, font_a, template, anim, y_offset)
+                    frame = render_frame(t, quote, author, font_size, y_offset, show_bg, "template", template, logo)
                 frames.append(frame)
-
-            out_path = os.path.join(tempfile.gettempdir(), f"quote_{int(time.time())}.mp4")
-            audio = download_audio()
+            
+            # Save
+            out = os.path.join(tempfile.gettempdir(), f"quote_{int(time.time())}.mp4")
+            audio = download_asset("https://ik.imagekit.io/ericmwangi/ambient-piano-112970.mp3?updatedAt=1764101548797", ".mp3")
+            from moviepy.editor import ImageSequenceClip, AudioFileClip
             clip = ImageSequenceClip(frames, fps=FPS)
             if audio:
                 try:
@@ -333,15 +309,14 @@ if st.button("🚀 Export 6-Second Video", type="primary", use_container_width=T
                     clip = clip.set_audio(aclip)
                 except:
                     pass
-            clip.write_videofile(out_path, codec="libx264", audio_codec="aac", logger=None, threads=4)
-
-            st.success("✅ Video ready!")
-            with open(out_path, "rb") as f:
-                st.download_button("⬇️ Download Video", f, "Ocean_Quote.mp4", "video/mp4", use_container_width=True)
-            st.video(out_path)
-
+            clip.write_videofile(out, codec="libx264", audio_codec="aac", logger=None, threads=4)
+            
+            st.success("✅ Done!")
+            with open(out, "rb") as f:
+                st.download_button("⬇️ Download", f, "WYSIWYG_Quote.mp4", use_container_width=True)
+            st.video(out)
+            
             clip.close()
-            if video_clip:
-                video_clip.close()
+            if video_clip: video_clip.close()
             del frames
             gc.collect()
