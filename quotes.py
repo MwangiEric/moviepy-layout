@@ -8,6 +8,7 @@ import math
 import requests
 import gc
 import time
+import re  # <-- added for regex
 from moviepy.editor import ImageSequenceClip, AudioFileClip, VideoFileClip
 
 # --------------------------------------------------------
@@ -121,20 +122,6 @@ def split_lines(text, font, max_width):
         lines.append(' '.join(current))
     return lines
 
-def fit_font_adaptive(quote, max_width=WIDTH - 200, max_lines=4):
-    if not quote.strip():
-        return get_font(60)
-    words = quote.split()
-    est_lines = max(1, min(max_lines, (len(words) + 5) // 6))
-    for size in range(82, 38, -2):
-        font = get_font(size)
-        lines = split_lines(quote, font, max_width)
-        if len(lines) <= max_lines:
-            too_wide = any((font.getbbox(line)[2] - font.getbbox(line)[0]) > max_width for line in lines)
-            if not too_wide:
-                return font
-    return get_font(40)
-
 # --------------------------------------------------------
 # BACKGROUND & RENDERING
 # --------------------------------------------------------
@@ -174,9 +161,11 @@ def create_background(template_name, t=0.0):
             draw.line([(0, y), (WIDTH, y)], fill=ACCENT_COLOR + "08", width=1)
     return np.array(base)
 
-def draw_text_overlay(overlay, lines, author, t, anim_type, font_quote, font_author):
+def draw_text_overlay(overlay, lines, author, t, anim_type, font_quote, font_author, y_offset=480):
     draw = ImageDraw.Draw(overlay)
-    y0, line_h = 480, 110
+    line_h = 110
+    y0 = y_offset  # controlled by slider
+
     anim = {"Auto": "highlight"}.get(anim_type, anim_type.lower().replace(" ", "-"))
     if anim == "typewriter":
         full = " ".join(lines)
@@ -224,13 +213,13 @@ def draw_text_overlay(overlay, lines, author, t, anim_type, font_quote, font_aut
         draw.text((WIDTH//2, y0 + len(lines) * line_h + 50), author, fill=ACCENT_COLOR, font=font_author, anchor="mm")
     draw.text((WIDTH//2, HEIGHT - 180), "Save this wisdom ✨", fill=ACCENT_COLOR, font=get_font(50), anchor="mm")
 
-def render_frame(t, lines, author, logo, font_q, font_a, template, anim, bg_array=None):
+def render_frame(t, lines, author, logo, font_q, font_a, template, anim, y_offset, bg_array=None):
     if bg_array is None:
         bg_array = create_background(template, t)
     overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
     if logo:
         overlay.paste(logo, (70, 60), logo)
-    draw_text_overlay(overlay, lines, author, t, anim, font_q, font_a)
+    draw_text_overlay(overlay, lines, author, t, anim, font_q, font_a, y_offset)
     fg = np.array(overlay)[:, :, :3]
     alpha = np.array(overlay)[:, :, 3:] / 255.0
     return (bg_array * (1 - alpha) + fg * alpha).astype(np.uint8)
@@ -251,28 +240,28 @@ def get_video_frame(clip, t):
         img = img.crop((0, top, w, top + new_h))
     return np.array(img.resize((WIDTH, HEIGHT), Image.LANCZOS))
 
-def render_preview_frame(quote, author, template, anim):
+def render_preview_frame(quote, author, template, anim, font_size, y_offset):
     logo = load_logo()
-    font_q = fit_font_adaptive(quote)
-    font_a = get_font(52)
+    font_q = get_font(font_size)
+    font_a = get_font(max(40, int(font_size * 0.65)))
     lines = split_lines(quote, font_q, WIDTH - 200)
     t = 1.5
     if anim == "Typewriter":
         t = min(2.5, max(1.0, len(quote) / 8))
     elif anim == "Neon Pulse":
         t = 0.8
-    return render_frame(t, lines, author, logo, font_q, font_a, template, anim)
+    return render_frame(t, lines, author, logo, font_q, font_a, template, anim, y_offset)
 
 # --------------------------------------------------------
 # STREAMLIT APP
 # --------------------------------------------------------
 st.set_page_config(page_title="Ocean Quote Reels", layout="wide", page_icon="🌊")
 st.title("🌊 Ocean Quote Reels")
-st.caption("Enter your quote → See live preview → Export 6-second video")
+st.caption("Customize text size & position → Preview → Export 6s video")
 
 col1, col2 = st.columns(2)
 with col1:
-    quote = st.text_area("Your Quote", "The ocean stirs the soul and fuels the imagination.", height=120, max_chars=200)
+    quote = st.text_area("Your Quote", "The ocean whispers secrets to those who listen.", height=120, max_chars=200)
 with col2:
     author = st.text_input("Author", "— Anonymous", max_chars=50)
 
@@ -282,25 +271,33 @@ with col3:
 with col4:
     anim = st.selectbox("🔤 Text Animation", TEXT_ANIMATIONS)
 
+# ===== TEXT CONTROLS =====
+st.markdown("### ✏️ Text Customization")
+col5, col6 = st.columns(2)
+with col5:
+    font_size = st.slider("🔤 Font Size", min_value=40, max_value=120, value=80, step=2)
+with col6:
+    y_offset = st.slider("↕️ Vertical Position", min_value=300, max_value=900, value=480, step=10)
+
 use_ocean_bg = st.checkbox("🌊 Use ocean video background", value=True)
 
-# LIVE PREVIEW
+# ===== LIVE PREVIEW =====
 st.markdown("### 👁️ Live Preview")
 try:
-    preview_img = render_preview_frame(quote, author, template, anim)
-    st.image(preview_img, width=320, caption="Preview at optimal time")
+    preview_img = render_preview_frame(quote, author, template, anim, font_size, y_offset)
+    st.image(preview_img, width=320)
 except Exception as e:
-    st.error("Preview unavailable. Check inputs.")
+    st.error("Preview error. Check inputs.")
 
-# EXPORT BUTTON
+# ===== EXPORT =====
 if st.button("🚀 Export 6-Second Video", type="primary", use_container_width=True):
     if not quote.strip():
         st.error("Please enter a quote.")
     else:
         with st.spinner("Rendering your 6-second video... (30–50 sec)"):
             logo = load_logo()
-            font_q = fit_font_adaptive(quote)
-            font_a = get_font(52)
+            font_q = get_font(font_size)
+            font_a = get_font(max(40, int(font_size * 0.65)))
             lines = split_lines(quote, font_q, WIDTH - 200)
 
             video_clip = None
@@ -314,7 +311,7 @@ if st.button("🚀 Export 6-Second Video", type="primary", use_container_width=T
                         else:
                             video_clip = video_clip.subclip(0, DURATION)
                     except Exception as e:
-                        st.warning("Using animated background instead of video.")
+                        st.warning("Using animated background instead.")
 
             frames = []
             total_frames = FPS * DURATION
@@ -322,9 +319,9 @@ if st.button("🚀 Export 6-Second Video", type="primary", use_container_width=T
                 t = i / FPS
                 if video_clip is not None:
                     bg = get_video_frame(video_clip, t)
-                    frame = render_frame(t, lines, author, logo, font_q, font_a, template, anim, bg_array=bg)
+                    frame = render_frame(t, lines, author, logo, font_q, font_a, template, anim, y_offset, bg_array=bg)
                 else:
-                    frame = render_frame(t, lines, author, logo, font_q, font_a, template, anim)
+                    frame = render_frame(t, lines, author, logo, font_q, font_a, template, anim, y_offset)
                 frames.append(frame)
 
             out_path = os.path.join(tempfile.gettempdir(), f"quote_{int(time.time())}.mp4")
@@ -338,7 +335,7 @@ if st.button("🚀 Export 6-Second Video", type="primary", use_container_width=T
                     pass
             clip.write_videofile(out_path, codec="libx264", audio_codec="aac", logger=None, threads=4)
 
-            st.success("✅ Your 6-second video is ready!")
+            st.success("✅ Video ready!")
             with open(out_path, "rb") as f:
                 st.download_button("⬇️ Download Video", f, "Ocean_Quote.mp4", "video/mp4", use_container_width=True)
             st.video(out_path)
