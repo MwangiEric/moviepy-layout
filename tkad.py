@@ -1,8 +1,8 @@
 import streamlit as st
-import os, io, tempfile, math, time, gc, requests, subprocess
+import os, io, tempfile, math, time, gc, requests
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
-from moviepy.editor import AudioFileClip
+from moviepy.editor import ImageSequenceClip, AudioFileClip
 import contextlib
 import cv2
 
@@ -14,18 +14,14 @@ FPS, DURATION = 24, 4
 TOTAL_FRAMES  = FPS * DURATION
 
 # Colours
-MAROON      = (153, 0, 0)
+MAROON      = (153, 0, 0)      # Tripple-K maroon
 WHITE       = (255, 255, 255)
 LIME_GREEN  = (50, 205, 50)
 TEXT_COLOUR = (30, 30, 30)
 BG_COLOUR   = (245, 245, 247)
-# --------------------------------------------------------
-# CONFIG  (add this line)
-# --------------------------------------------------------
-ACCENT      = (153, 0, 0)      # Tripple-K maroon
+ACCENT      = (153, 0, 0)      # same as MAROON
 
-
-# Remote assets  (WebP when available → 30 % smaller)
+# Remote assets (no CORS proxy)
 LOGO_URL    = "https://www.tripplek.co.ke/wp-content/uploads/2024/10/Tripple-K-Com-Logo-255-by-77.png"
 PRODUCT_URL = "https://www.tripplek.co.ke/wp-content/uploads/2025/02/iphone-16e-33.png"
 AUDIO_URL   = "https://ik.imagekit.io/ericmwangi/tech-ambient.mp3?updatedAt=1764372632499"
@@ -81,29 +77,25 @@ def get_font(size, bold=True):
             return ImageFont.load_default()
 
 # --------------------------------------------------------
-# PREMIUM LOOK FILTERS  (GPU)
+# CPU PREMIUM FILTERS  (cloud-safe)
 # --------------------------------------------------------
+def cpu_filters(frame):
+    """Cloud-compatible filters"""
+    # subtle film grain
+    noise = np.random.normal(0, 3, frame.shape).astype(np.uint8)
+    frame = cv2.add(frame, noise)
+    # chromatic aberration
+    b, g, r = cv2.split(frame)
+    b = np.roll(b, 1, axis=1)
+    r = np.roll(r, -1, axis=1)
+    return cv2.merge([b, g, r])
+
 def ease_out_elastic(t):
     c4 = (2 * math.pi) / 3
     return pow(2, -10 * t) * math.sin((t * 10 - 0.75) * c4) + 1
 
-
-def film_grain_gpu(gpu, intensity=0.02):
-    noise = cv2.cuda_GpuMat(gpu.size(), cv2.CV_8UC3)
-    cv2.cuda.randn(noise, 0, intensity * 255, noise)
-    return cv2.cuda.add(gpu, noise, dtype=cv2.CV_8UC3)
-
-
-def chromatic_aberration_gpu(gpu, amount=1.5):
-    b, g, r = cv2.cuda.split(gpu)
-    b = cv2.cuda.resize(b, (b.cols + int(amount), b.rows + int(amount)))
-    b = b.colRange(int(amount // 2), b.cols - int(amount // 2))
-    b = b.rowRange(int(amount // 2), b.rows - int(amount // 2))
-    return cv2.cuda.merge([b, g, r])
-
-
 # --------------------------------------------------------
-# LIGHT BACKGROUND  (CPU)
+# LIGHT BACKGROUND
 # --------------------------------------------------------
 def light_bg(t):
     base = Image.new("RGB", (WIDTH, HEIGHT), BG_COLOUR)
@@ -139,7 +131,7 @@ def light_bg(t):
     return np.array(base)
 
 # --------------------------------------------------------
-# TEXT BOX  (vector scale)
+# TEXT BOX
 # --------------------------------------------------------
 def text_box(text, font, colour):
     dummy = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
@@ -152,14 +144,13 @@ def text_box(text, font, colour):
     return box
 
 # --------------------------------------------------------
-# DRAW FRAME  (CPU → GPU)
+# DRAW FRAME
 # --------------------------------------------------------
 def draw_frame(t, product, specs, price,
                logo_size, logo_xy, product_size, product_xy,
                headline_size, headline_xy, spec_size, spec_xy, spec_spacing,
                price_size, price_xy, price_font,
                cta_size, cta_xy, cta_font):
-    # CPU part
     rgb  = light_bg(t)
     base = Image.fromarray(rgb).convert("RGBA")
     canvas = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
@@ -168,13 +159,13 @@ def draw_frame(t, product, specs, price,
     logo = load_image(LOGO_URL, logo_size)
     canvas.paste(logo, logo_xy, logo)
 
-    # headline (centred + spring motion)
+    # headline (spring)
     head_img = text_box(product.upper(), get_font(headline_size), TEXT_COLOUR)
     spring_x = int(40 * ease_out_elastic((t*0.6) % 1))
     head_x = (WIDTH - head_img.width) // 2 + headline_xy[0] + spring_x
     canvas.paste(head_img, (head_x, headline_xy[1]), head_img)
 
-    # product (centred + float)
+    # product (spring float)
     phone = load_image(PRODUCT_URL, product_size)
     float_y = int(product_xy[1] + 40 * ease_out_elastic((t*0.8) % 1))
     prod_x = (WIDTH - product_size[0]) // 2 + product_xy[0]
@@ -219,74 +210,47 @@ def draw_frame(t, product, specs, price,
                 ((WIDTH - web_img.width) // 2, HEIGHT - 50),
                 web_img)
 
-    # CPU → GPU for premium filters
-    gpu = cv2.cuda_GpuMat()
-    gpu.upload(np.asarray(canvas))
-    gpu = chromatic_aberration_gpu(gpu, amount=1.5)
-    gpu = film_grain_gpu(gpu, intensity=0.02)
-    return gpu.download()
-
+    # CPU premium filters
+    np_canvas = np.asarray(canvas)
+    np_canvas = cpu_filters(np_canvas)
+    return np_canvas
 # --------------------------------------------------------
-# STREAMING GPU ENCODER  (H.265 2-pass)
+# SINGLE-PASS ENCODER  (cloud-safe, no ffmpeg binary needed)
 # --------------------------------------------------------
 def build_video(product, specs, price, ui):
-    # pass-1 log file
-    pass1_log = tempfile.mktemp(suffix=".log")
-    tmp1 = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-    tmp1.close()
+    def frame_generator():
+        for i in range(TOTAL_FRAMES):
+            yield draw_frame(i / FPS, product, specs, price, **ui)
 
-    # pass-1 (fast)
-    cmd1 = [
-        "ffmpeg", "-y", "-f", "rawvideo", "-vcodec", "rawvideo",
-        "-s", f"{WIDTH}x{HEIGHT}", "-pix_fmt", "bgr24", "-r", str(FPS), "-i", "-",
-        "-c:v", "libx265", "-b:v", "2M", "-pass", "1", "-passlogfile", pass1_log,
-        "-preset", "fast", "-an", "-f", "mp4", tmp1.name
-    ]
     bar = st.progress(0)
-    proc1 = subprocess.Popen(cmd1, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    for i in range(TOTAL_FRAMES):
-        frame = draw_frame(i / FPS, product, specs, price, **ui)
-        proc1.stdin.write(frame.tobytes())
-        bar.progress((i + 1) / TOTAL_FRAMES)
-    proc1.stdin.close()
-    proc1.wait()
+    clip = ImageSequenceClip([f for f in frame_generator()], fps=FPS)
+    bar.progress(TOTAL_FRAMES)
 
-    # pass-2 (final)
-    tmp2 = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-    tmp2.close()
+    # optional audio
     audio_path = download(AUDIO_URL, ".mp3")
-    audio_cmd = ["-i", audio_path, "-c:a", "aac", "-b:a", "128k"] if audio_path else ["-an"]
-    cmd2 = [
-        "ffmpeg", "-y", "-f", "rawvideo", "-vcodec", "rawvideo",
-        "-s", f"{WIDTH}x{HEIGHT}", "-pix_fmt", "bgr24", "-r", str(FPS), "-i", "-",
-        "-i", audio_path, "-c:v", "libx265", "-b:v", "2M", "-pass", "2",
-        "-passlogfile", pass1_log, "-preset", "slow", "-movflags", "+faststart",
-        "-c:a", "aac", "-b:a", "128k", tmp2.name
-    ] if audio_path else [
-        "ffmpeg", "-y", "-f", "rawvideo", "-vcodec", "rawvideo",
-        "-s", f"{WIDTH}x{HEIGHT}", "-pix_fmt", "bgr24", "-r", str(FPS), "-i", "-",
-        "-c:v", "libx265", "-b:v", "2M", "-pass", "2", "-passlogfile", pass1_log,
-        "-preset", "slow", "-movflags", "+faststart", "-an", tmp2.name
-    ]
-    proc2 = subprocess.Popen(cmd2, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    for i in range(TOTAL_FRAMES):
-        frame = draw_frame(i / FPS, product, specs, price, **ui)
-        proc2.stdin.write(frame.tobytes())
-    proc2.stdin.close()
-    proc2.wait()
+    if audio_path and os.path.isfile(audio_path):
+        with contextlib.closing(AudioFileClip(audio_path)) as aclip:
+            clip = clip.set_audio(aclip.subclip(0, DURATION))
 
-    os.remove(tmp1.name)
-    os.remove(pass1_log)
-    return tmp2.name
-
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+    tmp.close()
+    # single-pass: crf 18 + fast preset + faststart
+    clip.write_videofile(tmp.name,
+                       codec="libx264",
+                       audio_codec="aac",
+                       ffmpeg_params=["-movflags", "+faststart", "-crf", "18", "-preset", "fast"],
+                       logger=None,
+                       threads=4)
+    del clip
+    gc.collect()
+    return tmp.name
 # --------------------------------------------------------
-# UI  (same sliders as before)
+# UI  (DOUBLE-RANGE SLIDERS)
 # --------------------------------------------------------
-st.set_page_config(page_title="TrippleK Ad Studio", layout="centered")
+st.set_page_config(page_title="TrippleK Premium", layout="centered")
 st.title("📱 TrippleK Premium Ad Generator")
-st.caption("GPU render • H.265 • Spring motion • Film grain • 2-pass encode")
+st.caption("CPU filters • Spring motion • CRF 18 • Double slider range")
 
-# Sidebar sliders (identical to previous answer – kept short)
 with st.sidebar:
     product = st.text_input("Phone Name", "iPhone 16e")
     specs   = st.text_area("Specs (1 per line)",
@@ -294,35 +258,39 @@ with st.sidebar:
                           height=120)
     price   = st.text_input("Price text", "KSh 145,000")
 
-    st.subheader("🎚️ Layout Sliders")
-    logo_w  = st.slider("Logo width", 200, 600, 420, 10)
-    logo_h  = st.slider("Logo height", 60, 200, 100, 10)
-    logo_x  = st.slider("Logo X", 0, 300, 60, 10)
-    logo_y  = st.slider("Logo Y", 0, 300, 60, 10)
-    head_size = st.slider("Headline font size", 40, 120, 90, 2)
-    head_x    = st.slider("Headline X offset", -200, 200, 0, 10)
-    head_y    = st.slider("Headline Y", 150, 400, 220, 10)
-    prod_w = st.slider("Product width", 400, 900, 650, 10)
-    prod_h = st.slider("Product height", 600, 1000, 900, 10)
-    prod_x = st.slider("Product X offset", -200, 200, 0, 10)
-    prod_y = st.slider("Product Y", 200, 700, 450, 10)
-    spec_size = st.slider("Spec font size", 20, 80, 42, 2)
-    spec_x    = st.slider("Spec X", 0, 900, 750, 10)
-    spec_y_off= st.slider("Spec Y offset from middle", -200, 200, 0, 10)
-    spec_gap  = st.slider("Spec line gap", 50, 150, 90, 10)
-    price_w = st.slider("Price tag width", 200, 500, 300, 10)
-    price_h = st.slider("Price tag height", 50, 150, 90, 10)
-    price_x = st.slider("Price X offset", -200, 200, 0, 10)
-    price_y = st.slider("Price Y", HEIGHT - 400, HEIGHT - 100, HEIGHT - 210, 10)
-    price_font = st.slider("Price font size", 20, 100, 48, 2)
-    cta_w  = st.slider("CTA width", 200, 600, 350, 10)
-    cta_h  = st.slider("CTA height", 40, 120, 80, 10)
-    cta_x  = st.slider("CTA X", 0, 500, 60, 10)
-    cta_y  = st.slider("CTA Y", HEIGHT - 300, HEIGHT - 100, HEIGHT - 180, 10)
-    cta_font = st.slider("CTA font size", 20, 100, 46, 2)
+    st.subheader("🎚️ Layout Sliders (Premium Range)")
+    # logo
+    logo_w  = st.slider("Logo width",  200, 1200, 420, 10)
+    logo_h  = st.slider("Logo height", 60,  400, 100, 10)
+    logo_x  = st.slider("Logo X", 0, 600, 60, 10)
+    logo_y  = st.slider("Logo Y", 0, 600, 60, 10)
+    # headline
+    head_size = st.slider("Headline font size", 20, 200, 90, 2)
+    head_x    = st.slider("Headline X offset", -400, 400, 0, 10)
+    head_y    = st.slider("Headline Y", 0, 600, 220, 10)
+    # product
+    prod_w = st.slider("Product width",  300, 1500, 650, 10)
+    prod_h = st.slider("Product height", 400, 1600, 900, 10)
+    prod_x = st.slider("Product X offset", -400, 400, 0, 10)
+    prod_y = st.slider("Product Y", 0, 1000, 450, 10)
+    # specs
+    spec_size = st.slider("Spec font size", 14, 120, 42, 2)
+    spec_x    = st.slider("Spec X", 0, 1200, 750, 10)
+    spec_y_off= st.slider("Spec Y offset from middle", -400, 400, 0, 10)
+    spec_gap  = st.slider("Spec line gap", 30, 250, 90, 10)
+    # price
+    price_w = st.slider("Price tag width",  150, 800, 300, 10)
+    price_h = st.slider("Price tag height", 40, 300, 90, 10)
+    price_x = st.slider("Price X offset", -400, 400, 0, 10)
+    price_y = st.slider("Price Y", HEIGHT-600, HEIGHT-50, HEIGHT-210, 10)
+    price_font = st.slider("Price font size", 14, 150, 48, 2)
+    # cta
+    cta_w  = st.slider("CTA width",  150, 900, 350, 10)
+    cta_h  = st.slider("CTA height", 30, 300, 80, 10)
+    cta_x  = st.slider("CTA X", 0, 800, 60, 10)
+    cta_y  = st.slider("CTA Y", HEIGHT-500, HEIGHT-50, HEIGHT-180, 10)
+    cta_font = st.slider("CTA font size", 14, 150, 46, 2)
 
-    # voice-over upload (premium)
-    voice = st.file_uploader("Upload voice-over (optional)", type=["mp3", "wav"])
     export = st.button("🚀 Generate Premium MP4", type="primary", use_container_width=True)
 
 # Pack UI
@@ -344,12 +312,12 @@ ui_pack = {
     "cta_font": cta_font
 }
 
-# Main preview / export
+# Main column
 if export:
     if not product.strip():
         st.error("Add a product name!")
         st.stop()
-    with st.spinner("GPU rendering + 2-pass encode..."):
+    with st.spinner("Rendering premium ad..."):
         path = build_video(product, specs, price, ui_pack)
     st.success("✅ Premium ad ready!")
     with open(path, "rb") as f:
