@@ -28,29 +28,6 @@ PRODUCT_URL = "https://www.tripplek.co.ke/wp-content/uploads/2025/02/iphone-16e-
 AUDIO_URL   = "https://ik.imagekit.io/ericmwangi/tech-ambient.mp3?updatedAt=1764372632499"
 
 # --------------------------------------------------------
-# Safe access helper
-# --------------------------------------------------------
-def safe_ai(key, default=""):
-    return st.session_state.get(key, default)
-
-# --------------------------------------------------------
-# Use it in draw_frame / UI
-# --------------------------------------------------------
-title   = safe_ai("ai_content", {}).get("title",   "Luxury DIY Tip")
-tip     = safe_ai("ai_content", {}).get("tip",     "Stay tuned for more tips.")
-hashtags= safe_ai("ai_content", {}).get("hashtags", "#DIY #Luxury")
-
-# --------------------------------------------------------
-# Session-state defaults (run once)
-# --------------------------------------------------------
-if "ai_content" not in st.session_state:
-    st.session_state.ai_content = {
-        "title": "Luxury DIY Tip",
-        "tip": "Stay tuned for more tips.",
-        "hashtags": "#DIY #Luxury"
-    }
-
-# --------------------------------------------------------
 # BASE64 SESSION CACHE  (download once, reuse forever)
 # --------------------------------------------------------
 @st.cache_data(show_spinner=False)
@@ -112,7 +89,25 @@ def get_font(size, bold=True):
             return ImageFont.load_default()
 
 # --------------------------------------------------------
-# ANIMATED BACKGROUND  (CPU, brand colours)
+# CPU FILTERS  (choose one)
+# --------------------------------------------------------
+def cpu_filters(frame):
+    """Zero overhead"""
+    return np.asarray(frame)
+
+def minimal_vignette(frame):
+    h, w = frame.shape[:2]
+    x, y = np.meshgrid(np.arange(w), np.arange(h))
+    mask = 1 - (x/w - 0.5)**2 - (y/h - 0.5)**2
+    mask = np.clip(mask * 1.2, 0.8, 1.0)
+    return (frame * mask[:,:,np.newaxis]).astype(np.uint8)
+
+def ease_out_elastic(t):
+    c4 = (2 * math.pi) / 3
+    return pow(2, -10 * t) * math.sin((t * 10 - 0.75) * c4) + 1
+
+# --------------------------------------------------------
+# ANIMATED BACKGROUND
 # --------------------------------------------------------
 def animated_bg(t):
     base = Image.new("RGB", (WIDTH, HEIGHT), BG_COLOUR)
@@ -132,43 +127,10 @@ def animated_bg(t):
         h = 200 + 50 * math.cos(t * 0.5 + i)
         cx = WIDTH / 2 + 350 * math.sin(t * 0.6 + i)
         cy = HEIGHT / 2 + 350 * math.cos(t * 0.5 + i)
-        angle = math.degrees(t * 0.4 + i * 60)
-        coords = []
-        for k in range(4):
-            θ = math.radians(angle + k * 90)
-            coords.append((cx + w / 2 * math.cos(θ), cy + h / 2 * math.sin(θ)))
-        opacity = int(80 + 50 * math.sin(t * 0.8 + i))
-        draw.polygon(coords, fill=(*LIME_GREEN, opacity))
-
-    # white glints (front)
-    for i in range(20):
-        x = int(WIDTH * (0.05 + 0.9 * (math.sin(t * 2.1 + i * 2.3) + 1) / 2))
-        y = int(HEIGHT * (0.05 + 0.9 * (math.cos(t * 2.3 + i * 1.9) + 1) / 2))
-        s = 6 + 4 * math.sin(t * 3 + i)
-        opacity = int(200 + 55 * math.sin(t * 4 + i))
-        draw.ellipse([x - s, y - s, x + s, y + s], fill=(*WHITE, opacity))
-
-    return np.array(base)
-    # --------------------------------------------------------
-# CPU FILTERS  (choose one)
-# --------------------------------------------------------
-def cpu_filters(frame):
-    """Zero overhead"""
-    return np.asarray(frame)
-
-def minimal_vignette(frame):
-    h, w = frame.shape[:2]
-    x, y = np.meshgrid(np.arange(w), np.arange(h))
-    mask = 1 - (x/w - 0.5)**2 - (y/h - 0.5)**2
-    mask = np.clip(mask * 1.2, 0.8, 1.0)
-    return (frame * mask[:,:,np.newaxis]).astype(np.uint8)
-    # --------------------------------------------------------
+        angle = math.degrees(t * 0.4 + i * 60)# --------------------------------------------------------
 # TEXT BOX  (auto-wrap + auto-scale + line-height)
 # --------------------------------------------------------
 def text_box(text, box_size, colour, bold=True, line_spacing=1.15):
-    """
-    Return PIL image with text **auto-wrapped + auto-scaled** to box_size (w, h)
-    """
     w, h = box_size
     words = text.split()
     size = h // 2                       # start big
@@ -202,7 +164,7 @@ def text_box(text, box_size, colour, bold=True, line_spacing=1.15):
         y += int(line_h)
     return img
     # --------------------------------------------------------
-# DRAW FRAME
+# DRAW FRAME  (uses real slider variables)
 # --------------------------------------------------------
 def draw_frame(t, product, specs, price,
                logo_size, logo_xy, product_size, product_xy,
@@ -219,13 +181,13 @@ def draw_frame(t, product, specs, price,
 
     # product (base64)
     phone = b64_to_pil(st.session_state.get("product_b64"), product_size, "Product")
-    float_y = int(product_xy[1] + 40 * math.sin(t * 1.1))
+    float_y = int(product_xy[1] + 40 * ease_out_elastic((t*0.8) % 1))
     prod_x = (WIDTH - product_size[0]) // 2 + product_xy[0]
     canvas.paste(phone, (prod_x, float_y), phone)
-                   
-    # headline (fills headline box)
-    head_img = text_box(title, (headline_width, headline_height), ACCENT_GOLD)
-    spring_x = int(40 * math.sin(t * 0.6))
+
+    # headline (fills box + spring)
+    head_img = text_box(product.upper(), (headline_size*10, headline_size), ACCENT_GOLD)
+    spring_x = int(40 * ease_out_elastic((t*0.6) % 1))
     head_x = (WIDTH - head_img.width) // 2 + headline_xy[0] + spring_x
     canvas.paste(head_img, (head_x, headline_xy[1]), head_img)
 
@@ -239,7 +201,7 @@ def draw_frame(t, product, specs, price,
         y = start_y + i * spec_spacing
         card = Image.new("RGBA", (320, 70), (*WHITE, alpha // 2))
         canvas.paste(card, (spec_xy[0] - 20, y - 10), card)
-        txt_img = text_box(line, (280, 60), TEXT_WHITE)
+        txt_img = text_box(txt, (280, 60), (*TEXT_COLOUR, alpha))
         canvas.paste(txt_img, (spec_xy[0], y), txt_img)
 
     # price (fills tag)
@@ -248,7 +210,7 @@ def draw_frame(t, product, specs, price,
     px = (WIDTH - pw) // 2 + price_xy[0]
     py = price_xy[1] + (price_size[1] - ph) // 2
     draw = ImageDraw.Draw(canvas)
-    draw.rounded_rectangle((px, py, px + pw, py + ph), radius=25, fill=ACCENT)
+    draw.rounded_rectangle((px, py, px + pw, py + ph), radius=25, fill=ACCENT_GOLD)
     price_img = text_box(price, (pw, ph), WHITE)
     canvas.paste(price_img,
                 (px + (pw - price_img.width) // 2,
@@ -256,7 +218,7 @@ def draw_frame(t, product, specs, price,
                 price_img)
 
     # cta (fills button)
-    cta_img = text_box("SHOP NOW", (cta_w, cta_h), WHITE)
+    cta_img = text_box("SHOP NOW", (cta_size[0], cta_size[1]), WHITE)
     canvas.paste(cta_img,
                 (cta_xy[0] + (cta_size[0] - cta_img.width) // 2,
                  cta_xy[1] + (cta_size[1] - cta_img.height) // 2),
@@ -273,7 +235,7 @@ def draw_frame(t, product, specs, price,
     np_canvas = cpu_filters(np_canvas)          # 0 % overhead
     # np_canvas = minimal_vignette(np_canvas)   # 5 % overhead
     return np_canvas
-    # --------------------------------------------------------
+                   # --------------------------------------------------------
 # SINGLE-PASS ENCODER  (cloud-safe)
 # --------------------------------------------------------
 def build_video(product, specs, price, ui):
@@ -398,3 +360,20 @@ if export:
 else:
     preview = np.asarray(draw_frame(1.0, product, specs, price, **ui_pack))
     st.image(preview, use_column_width=True)
+        coords = []
+        for k in range(4):
+            θ = math.radians(angle + k * 90)
+            coords.append((cx + w / 2 * math.cos(θ), cy + h / 2 * math.sin(θ)))
+        opacity = int(80 + 50 * math.sin(t * 0.8 + i))
+        draw.polygon(coords, fill=(*LIME_GREEN, opacity))
+
+    # white glints (front)
+    for i in range(20):
+        x = int(WIDTH * (0.05 + 0.9 * (math.sin(t * 2.1 + i * 2.3) + 1) / 2))
+        y = int(HEIGHT * (0.05 + 0.9 * (math.cos(t * 2.3 + i * 1.9) + 1) / 2))
+        s = 6 + 4 * math.sin(t * 3 + i)
+        opacity = int(200 + 55 * math.sin(t * 4 + i))
+        draw.ellipse([x - s, y - s, x + s, y + s], fill=(*WHITE, opacity))
+
+    return np.array(base)
+
