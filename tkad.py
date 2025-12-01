@@ -19,6 +19,11 @@ WHITE       = (255, 255, 255)
 LIME_GREEN  = (50, 205, 50)
 TEXT_COLOUR = (30, 30, 30)
 BG_COLOUR   = (245, 245, 247)
+# --------------------------------------------------------
+# CONFIG  (add this line)
+# --------------------------------------------------------
+ACCENT      = (153, 0, 0)      # Tripple-K maroon
+
 
 # Remote assets  (WebP when available → 30 % smaller)
 LOGO_URL    = "https://www.tripplek.co.ke/wp-content/uploads/2024/10/Tripple-K-Com-Logo-255-by-77.png"
