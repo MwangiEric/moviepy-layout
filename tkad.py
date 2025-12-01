@@ -81,14 +81,19 @@ def get_font(size, bold=True):
 # --------------------------------------------------------
 def cpu_filters(frame):
     """Cloud-compatible filters"""
-    # subtle film grain
-    noise = np.random.normal(0, 3, frame.shape).astype(np.uint8)
-    frame = cv2.add(frame, noise)
+    # drop alpha → BGR
+    bgr  = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+    # film grain
+    noise = np.random.normal(0, 3, bgr.shape).astype(np.uint8)
+    bgr   = cv2.add(bgr, noise)
     # chromatic aberration
-    b, g, r = cv2.split(frame)
+    b, g, r = cv2.split(bgr)
     b = np.roll(b, 1, axis=1)
     r = np.roll(r, -1, axis=1)
-    return cv2.merge([b, g, r])
+    bgr = cv2.merge([b, g, r])
+    # back to RGBA for moviepy
+    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGBA)
+
 
 def ease_out_elastic(t):
     c4 = (2 * math.pi) / 3
