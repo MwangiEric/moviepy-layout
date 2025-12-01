@@ -143,10 +143,13 @@ def minimal_vignette(frame):
 # TEXT BOX  (auto-wrap + auto-scale + line-height)
 # --------------------------------------------------------
 def text_box(text, box_size, colour, bold=True, line_spacing=1.15):
+    """
+    Return PIL image with text **auto-wrapped + auto-scaled** to box_size (w, h)
+    """
     w, h = box_size
     words = text.split()
-    size = h // 2  # start big
-    while size > 10:
+    size = h // 2                       # start big
+    while size > 10:                    # safeguard
         font = get_font(size, bold)
         line_h = (font.getbbox("Ay")[3] - font.getbbox("Ay")[1]) * line_spacing
         # wrap words
@@ -196,9 +199,9 @@ def draw_frame(t, product, specs, price,
     float_y = int(product_xy[1] + 40 * math.sin(t * 1.1))
     prod_x = (WIDTH - product_size[0]) // 2 + product_xy[0]
     canvas.paste(phone, (prod_x, float_y), phone)
-
-    # headline (fills box + spring)
-    head_img = text_box(product.upper(), (headline_size*10, headline_size), TEXT_COLOUR)
+                   
+    # headline (fills headline box)
+    head_img = text_box(title, (headline_width, headline_height), ACCENT_GOLD)
     spring_x = int(40 * math.sin(t * 0.6))
     head_x = (WIDTH - head_img.width) // 2 + headline_xy[0] + spring_x
     canvas.paste(head_img, (head_x, headline_xy[1]), head_img)
@@ -213,7 +216,7 @@ def draw_frame(t, product, specs, price,
         y = start_y + i * spec_spacing
         card = Image.new("RGBA", (320, 70), (*WHITE, alpha // 2))
         canvas.paste(card, (spec_xy[0] - 20, y - 10), card)
-        txt_img = text_box(txt, (280, 60), (*TEXT_COLOUR, alpha))
+        txt_img = text_box(line, (280, 60), TEXT_WHITE)
         canvas.paste(txt_img, (spec_xy[0], y), txt_img)
 
     # price (fills tag)
@@ -230,7 +233,7 @@ def draw_frame(t, product, specs, price,
                 price_img)
 
     # cta (fills button)
-    cta_img = text_box("SHOP NOW", (cta_size[0], cta_size[1]), WHITE)
+    cta_img = text_box("SHOP NOW", (cta_w, cta_h), WHITE)
     canvas.paste(cta_img,
                 (cta_xy[0] + (cta_size[0] - cta_img.width) // 2,
                  cta_xy[1] + (cta_size[1] - cta_img.height) // 2),
