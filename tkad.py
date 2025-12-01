@@ -28,6 +28,16 @@ PRODUCT_URL = "https://www.tripplek.co.ke/wp-content/uploads/2025/02/iphone-16e-
 AUDIO_URL   = "https://ik.imagekit.io/ericmwangi/tech-ambient.mp3?updatedAt=1764372632499"
 
 # --------------------------------------------------------
+# Session-state defaults (run once)
+# --------------------------------------------------------
+if "ai_content" not in st.session_state:
+    st.session_state.ai_content = {
+        "title": "Luxury DIY Tip",
+        "tip": "Stay tuned for more tips.",
+        "hashtags": "#DIY #Luxury"
+    }
+
+# --------------------------------------------------------
 # BASE64 SESSION CACHE  (download once, reuse forever)
 # --------------------------------------------------------
 @st.cache_data(show_spinner=False)
