@@ -46,8 +46,7 @@ def scrape_tripplek_catalog(limit=10):
                 'image_url': image_url,
                 'discount': discount_text,
                 'url': name_link.find('a')['href'] if name_link else "",
-                'specs': "• Fresh from TrippleK
-• Official warranty"
+                'specs': "Fresh from TrippleK"
             })
         
         return products[:10]
