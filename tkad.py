@@ -360,7 +360,7 @@ if export:
 else:
     preview = np.asarray(draw_frame(1.0, product, specs, price, **ui_pack))
     st.image(preview, use_column_width=True)
-        coords = []
+    coords = []
         for k in range(4):
             θ = math.radians(angle + k * 90)
             coords.append((cx + w / 2 * math.cos(θ), cy + h / 2 * math.sin(θ)))
