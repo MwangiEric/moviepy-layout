@@ -362,7 +362,7 @@ else:
     st.image(preview, use_column_width=True)
     coords = []
     for k in range(4):
-         θ = math.radians(angle + k * 90)
+        θ = math.radians(angle + k * 90)
         coords.append((cx + w / 2 * math.cos(θ), cy + h / 2 * math.sin(θ)))
         opacity = int(80 + 50 * math.sin(t * 0.8 + i))
         draw.polygon(coords, fill=(*LIME_GREEN, opacity))
