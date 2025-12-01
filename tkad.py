@@ -366,7 +366,6 @@ else:
         coords.append((cx + w / 2 * math.cos(θ), cy + h / 2 * math.sin(θ)))
         opacity = int(80 + 50 * math.sin(t * 0.8 + i))
         draw.polygon(coords, fill=(*LIME_GREEN, opacity))
-
     # white glints (front)
     for i in range(20):
         x = int(WIDTH * (0.05 + 0.9 * (math.sin(t * 2.1 + i * 2.3) + 1) / 2))
