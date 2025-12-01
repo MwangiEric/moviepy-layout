@@ -374,5 +374,5 @@ else:
         s = 6 + 4 * math.sin(t * 3 + i)
         opacity = int(200 + 55 * math.sin(t * 4 + i))
         draw.ellipse([x - s, y - s, x + s, y + s], fill=(*WHITE, opacity))
-        return np.array(base)
+    return np.array(base)
 
