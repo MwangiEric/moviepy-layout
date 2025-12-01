@@ -5,6 +5,7 @@ import numpy as np
 from moviepy.editor import ImageSequenceClip, AudioFileClip
 import contextlib
 import cv2
+import base64
 
 # --------------------------------------------------------
 # CONFIG
@@ -14,12 +15,12 @@ FPS, DURATION = 24, 4
 TOTAL_FRAMES  = FPS * DURATION
 
 # Colours
-MAROON      = (153, 0, 0)      # Tripple-K maroon
+MAROON      = (153, 0, 0)
 WHITE       = (255, 255, 255)
 LIME_GREEN  = (50, 205, 50)
 TEXT_COLOUR = (30, 30, 30)
 BG_COLOUR   = (245, 245, 247)
-ACCENT      = (153, 0, 0)      # same as MAROON
+ACCENT      = (153, 0, 0)
 
 # Remote assets
 LOGO_URL    = "https://www.tripplek.co.ke/wp-content/uploads/2024/10/Tripple-K-Com-Logo-255-by-77.png"
@@ -27,60 +28,49 @@ PRODUCT_URL = "https://www.tripplek.co.ke/wp-content/uploads/2025/02/iphone-16e-
 AUDIO_URL   = "https://ik.imagekit.io/ericmwangi/tech-ambient.mp3?updatedAt=1764372632499"
 
 # --------------------------------------------------------
-# HELPERS
+# BASE64 SESSION CACHE  (download once, reuse forever)
 # --------------------------------------------------------
 @st.cache_data(show_spinner=False)
-def download(url, suffix=".png"):
+def url_to_base64(url, name):
     try:
-        r = requests.get(url, timeout=30)
-        if r.status_code == 200:
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-            tmp.write(r.content)
-            tmp.close()
-            return tmp.name
-    except Exception as e:
-        st.warning("Asset download failed – using fallback")
-    return None
-
-
-@st.cache_resource(show_spinner=False)
-def load_image(url_or_path, target_size, name="Image"):
-    """
-    Returns PIL RGBA image.
-    - Local file → direct open
-    - Remote URL → download + cache
-    - Failure → professional placeholder
-    """
-    if os.path.isfile(url_or_path):
-        img = Image.open(url_or_path).convert("RGBA")
-        st.success(f"✅ Local {name} loaded")
-        return img.resize(target_size, Image.Resampling.LANCZOS)
-
-    # Remote URL – try download
-    try:
-        resp = requests.get(url_or_path, timeout=20, stream=True)
+        resp = requests.get(url, timeout=30)
         resp.raise_for_status()
-        img = Image.open(io.BytesIO(resp.content)).convert("RGBA")
-        st.success(f"✅ Remote {name} loaded")
-        return img.resize(target_size, Image.Resampling.LANCZOS)
+        b64 = base64.b64encode(resp.content).decode()
+        st.session_state[name] = b64
+        return b64
     except Exception as e:
         st.warning(f"❌ {name} download failed: {e}")
+        st.session_state[name] = None
+        return None
 
-    # Professional fallback
-    w, h = target_size
+
+def b64_to_pil(b64, target_size, name):
+    if b64 is None:
+        return _fallback_image(target_size, name)
+    try:
+        raw = base64.b64decode(b64)
+        img = Image.open(io.BytesIO(raw)).convert("RGBA")
+        return img.resize(target_size, Image.Resampling.LANCZOS)
+    except Exception:
+        return _fallback_image(target_size, name)
+
+
+def _fallback_image(size, name):
+    w, h = size
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     if "logo" in name.lower():
         draw.rounded_rectangle([w//10, h//10, 9*w//10, 9*h//10], radius=20, fill=MAROON)
         draw.text((w//2, h//2), "TK", fill=WHITE, font=get_font(h//3), anchor="mm")
-    else:  # product
+    else:
         draw.rounded_rectangle([w//8, h//8, 7*w//8, 7*h//8], radius=50,
                               fill="#F0F0F0", outline="#333", width=3)
         draw.text((w//2, h//2), "PHONE", fill="#666", font=get_font(h//5), anchor="mm")
-    st.info(f"🎨 Using fallback {name}")
     return img
 
-
+# --------------------------------------------------------
+# FONT HELPERS
+# --------------------------------------------------------
 @st.cache_resource(show_spinner=False)
 def _font_bytes(bold=True):
     url = ("https://github.com/google/fonts/raw/main/ofl/inter/" +
@@ -89,7 +79,7 @@ def _font_bytes(bold=True):
 
 
 def get_font(size, bold=True):
-    size = max(20, int(size))
+    size = max(12, int(size))
     try:
         return ImageFont.truetype(io.BytesIO(_font_bytes(bold)), size)
     except Exception:
@@ -99,38 +89,21 @@ def get_font(size, bold=True):
             return ImageFont.load_default()
 
 # --------------------------------------------------------
-# CPU PREMIUM FILTERS  (cloud-safe)
+# ANIMATED BACKGROUND  (CPU, brand colours)
 # --------------------------------------------------------
-def cpu_filters(frame):
-    """Zero-overhead pass-through"""
-    return np.asarray(frame)
-
-def minimal_vignette(frame):
-    """Single effect - 5 % overhead, high impact"""
-    h, w = frame.shape[:2]
-    x, y = np.meshgrid(np.arange(w), np.arange(h))
-    mask = 1 - (x/w - 0.5)**2 - (y/h - 0.5)**2
-    mask = np.clip(mask * 1.2, 0.8, 1.0)
-    return (frame * mask[:,:,np.newaxis]).astype(np.uint8)
-
-def ease_out_elastic(t):
-    c4 = (2 * math.pi) / 3
-    return pow(2, -10 * t) * math.sin((t * 10 - 0.75) * c4) + 1
-
-# --------------------------------------------------------
-# LIGHT BACKGROUND
-# --------------------------------------------------------
-def light_bg(t):
+def animated_bg(t):
     base = Image.new("RGB", (WIDTH, HEIGHT), BG_COLOUR)
     draw = ImageDraw.Draw(base, "RGBA")
 
-    for i in range(4):
-        x = int(WIDTH / 2 + 400 * math.sin(t * 0.2 + i))
-        y = int(HEIGHT / 2 + 400 * math.cos(t * 0.15 + i))
+    # floating maroon circles (back)
+    for i in range(5):
+        x = int(WIDTH / 2 + 400 * math.sin(t * 0.2 + i * 1.3))
+        y = int(HEIGHT / 2 + 400 * math.cos(t * 0.15 + i * 1.1))
         r = 280 + 60 * math.sin(t * 0.3 + i)
         opacity = int(60 + 40 * math.sin(t * 0.4 + i))
         draw.ellipse([x - r, y - r, x + r, y + r], fill=(*ACCENT, opacity))
 
+    # lime rotated rectangles
     for i in range(6):
         w = 200 + 50 * math.sin(t * 0.7 + i)
         h = 200 + 50 * math.cos(t * 0.5 + i)
@@ -144,6 +117,7 @@ def light_bg(t):
         opacity = int(80 + 50 * math.sin(t * 0.8 + i))
         draw.polygon(coords, fill=(*LIME_GREEN, opacity))
 
+    # white glints (front)
     for i in range(20):
         x = int(WIDTH * (0.05 + 0.9 * (math.sin(t * 2.1 + i * 2.3) + 1) / 2))
         y = int(HEIGHT * (0.05 + 0.9 * (math.cos(t * 2.3 + i * 1.9) + 1) / 2))
@@ -152,38 +126,56 @@ def light_bg(t):
         draw.ellipse([x - s, y - s, x + s, y + s], fill=(*WHITE, opacity))
 
     return np.array(base)
+    # --------------------------------------------------------
+# CPU FILTERS  (choose one)
 # --------------------------------------------------------
-# TEXT BOX  (auto-scales to box)
+def cpu_filters(frame):
+    """Zero overhead"""
+    return np.asarray(frame)
+
+def minimal_vignette(frame):
+    h, w = frame.shape[:2]
+    x, y = np.meshgrid(np.arange(w), np.arange(h))
+    mask = 1 - (x/w - 0.5)**2 - (y/h - 0.5)**2
+    mask = np.clip(mask * 1.2, 0.8, 1.0)
+    return (frame * mask[:,:,np.newaxis]).astype(np.uint8)
+    # --------------------------------------------------------
+# TEXT BOX  (auto-wrap + auto-scale + line-height)
 # --------------------------------------------------------
-def text_box(text, box_size, colour, bold=True):
-    """
-    Return PIL image with text **scaled to fill** box_size (w, h)
-    """
+def text_box(text, box_size, colour, bold=True, line_spacing=1.15):
     w, h = box_size
-    # start from max possible size
-    size = h
-    font = get_font(size, bold)
-    # shrink until it fits
-    while True:
-        dummy = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(dummy)
-        l, t, r, b = draw.textbbox((0, 0), text, font=font)
-        tw, th = r - l, b - t
-        if tw <= w and th <= h:
+    words = text.split()
+    size = h // 2  # start big
+    while size > 10:
+        font = get_font(size, bold)
+        line_h = (font.getbbox("Ay")[3] - font.getbbox("Ay")[1]) * line_spacing
+        # wrap words
+        lines, cur_line = [], ""
+        for wd in words:
+            test = cur_line + (" " if cur_line else "") + wd
+            tw = font.getbbox(test)[2]
+            if tw <= w:
+                cur_line = test
+            else:
+                lines.append(cur_line)
+                cur_line = wd
+        if cur_line:
+            lines.append(cur_line)
+        total_h = int(len(lines) * line_h)
+        if total_h <= h:
             break
         size -= 2
-        font = get_font(size, bold)
-        if size < 10:  # safeguard
-            break
-    # render at final size
+
+    # render
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    # centre inside box
-    x = (w - tw) // 2 - l
-    y = (h - th) // 2 - t
-    draw.text((x, y), text, font=font, fill=colour)
+    y = (h - total_h) // 2
+    for line in lines:
+        tw = font.getbbox(line)[2]
+        draw.text(((w - tw) // 2, y), line, font=font, fill=colour)
+        y += int(line_h)
     return img
-# --------------------------------------------------------
+    # --------------------------------------------------------
 # DRAW FRAME
 # --------------------------------------------------------
 def draw_frame(t, product, specs, price,
@@ -191,25 +183,25 @@ def draw_frame(t, product, specs, price,
                headline_size, headline_xy, spec_size, spec_xy, spec_spacing,
                price_size, price_xy, price_font,
                cta_size, cta_xy, cta_font):
-    rgb  = light_bg(t)
+    rgb  = animated_bg(t)
     base = Image.fromarray(rgb).convert("RGBA")
     canvas = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
 
-    # logo
-    logo = load_image(LOGO_URL, logo_size, "Logo")
+    # logo (base64)
+    logo = b64_to_pil(st.session_state.get("logo_b64"), logo_size, "Logo")
     canvas.paste(logo, logo_xy, logo)
 
-    # headline (spring + fills box)
-    head_img = text_box(product.upper(), (headline_size*10, headline_size), TEXT_COLOUR)
-    spring_x = int(40 * ease_out_elastic((t*0.6) % 1))
-    head_x = (WIDTH - head_img.width) // 2 + headline_xy[0] + spring_x
-    canvas.paste(head_img, (head_x, headline_xy[1]), head_img)
-
-    # product (spring float)
-    phone = load_image(PRODUCT_URL, product_size, "Product")
-    float_y = int(product_xy[1] + 40 * ease_out_elastic((t*0.8) % 1))
+    # product (base64)
+    phone = b64_to_pil(st.session_state.get("product_b64"), product_size, "Product")
+    float_y = int(product_xy[1] + 40 * math.sin(t * 1.1))
     prod_x = (WIDTH - product_size[0]) // 2 + product_xy[0]
     canvas.paste(phone, (prod_x, float_y), phone)
+
+    # headline (fills box + spring)
+    head_img = text_box(product.upper(), (headline_size*10, headline_size), TEXT_COLOUR)
+    spring_x = int(40 * math.sin(t * 0.6))
+    head_x = (WIDTH - head_img.width) // 2 + headline_xy[0] + spring_x
+    canvas.paste(head_img, (head_x, headline_xy[1]), head_img)
 
     # specs (fills card)
     font_spec = get_font(spec_size[1])
@@ -250,12 +242,12 @@ def draw_frame(t, product, specs, price,
                 ((WIDTH - web_img.width) // 2, HEIGHT - 50),
                 web_img)
 
-    # CPU premium filters (choose one)
+    # optional filter
     np_canvas = np.asarray(canvas)
     np_canvas = cpu_filters(np_canvas)          # 0 % overhead
     # np_canvas = minimal_vignette(np_canvas)   # 5 % overhead
     return np_canvas
-# --------------------------------------------------------
+    # --------------------------------------------------------
 # SINGLE-PASS ENCODER  (cloud-safe)
 # --------------------------------------------------------
 def build_video(product, specs, price, ui):
@@ -285,12 +277,12 @@ def build_video(product, specs, price, ui):
     del clip
     gc.collect()
     return tmp.name
-# --------------------------------------------------------
+    # --------------------------------------------------------
 # UI  (DOUBLE-RANGE SLIDERS)
 # --------------------------------------------------------
 st.set_page_config(page_title="TrippleK Premium", layout="centered")
 st.title("📱 TrippleK Premium Ad Generator")
-st.caption("Bullet-proof images • Text fills box • Spring motion • CRF 18 • Double slider range")
+st.caption("Base64 images • Animated BG • Text fills box • CRF 18 • Double slider range")
 
 with st.sidebar:
     product = st.text_input("Phone Name", "iPhone 16e")
@@ -352,6 +344,14 @@ ui_pack = {
     "cta_xy": (cta_x, cta_y),
     "cta_font": cta_font
 }
+
+# --------------------------------------------------------
+# SESSION-INIT  (download once, base64)
+# --------------------------------------------------------
+if "logo_b64" not in st.session_state:
+    url_to_base64(LOGO_URL, "logo_b64")
+if "product_b64" not in st.session_state:
+    url_to_base64(PRODUCT_URL, "product_b64")
 
 # Main column
 if export:
