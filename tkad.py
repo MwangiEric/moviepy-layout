@@ -28,6 +28,19 @@ PRODUCT_URL = "https://www.tripplek.co.ke/wp-content/uploads/2025/02/iphone-16e-
 AUDIO_URL   = "https://ik.imagekit.io/ericmwangi/tech-ambient.mp3?updatedAt=1764372632499"
 
 # --------------------------------------------------------
+# Safe access helper
+# --------------------------------------------------------
+def safe_ai(key, default=""):
+    return st.session_state.get(key, default)
+
+# --------------------------------------------------------
+# Use it in draw_frame / UI
+# --------------------------------------------------------
+title   = safe_ai("ai_content", {}).get("title",   "Luxury DIY Tip")
+tip     = safe_ai("ai_content", {}).get("tip",     "Stay tuned for more tips.")
+hashtags= safe_ai("ai_content", {}).get("hashtags", "#DIY #Luxury")
+
+# --------------------------------------------------------
 # Session-state defaults (run once)
 # --------------------------------------------------------
 if "ai_content" not in st.session_state:
