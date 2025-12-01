@@ -24,6 +24,10 @@ ACCENT      = (153, 0, 0)
 # ADDED ACCENT_GOLD since it was used but not defined
 ACCENT_GOLD = (255, 191, 0) # Placeholder for a gold-like color
 
+# Initialize export status before it's potentially defined in the sidebar, 
+# ensuring the main 'if export:' block doesn't throw a NameError on first run.
+export = False
+
 # Remote assets
 LOGO_URL    = "https://www.tripplek.co.ke/wp-content/uploads/2024/10/Tripple-K-Com-Logo-255-by-77.png"
 PRODUCT_URL = "https://www.tripplek.co.ke/wp-content/uploads/2025/02/iphone-16e-33.png"
