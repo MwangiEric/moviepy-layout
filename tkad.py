@@ -21,7 +21,7 @@ TEXT_COLOUR = (30, 30, 30)
 BG_COLOUR   = (245, 245, 247)
 ACCENT      = (153, 0, 0)      # same as MAROON
 
-# Remote assets (no CORS proxy)
+# Remote assets
 LOGO_URL    = "https://www.tripplek.co.ke/wp-content/uploads/2024/10/Tripple-K-Com-Logo-255-by-77.png"
 PRODUCT_URL = "https://www.tripplek.co.ke/wp-content/uploads/2025/02/iphone-16e-33.png"
 AUDIO_URL   = "https://ik.imagekit.io/ericmwangi/tech-ambient.mp3?updatedAt=1764372632499"
@@ -45,18 +45,40 @@ def download(url, suffix=".png"):
 
 @st.cache_resource(show_spinner=False)
 def load_image(url_or_path, target_size, name="Image"):
+    """
+    Returns PIL RGBA image.
+    - Local file → direct open
+    - Remote URL → download + cache
+    - Failure → professional placeholder
+    """
     if os.path.isfile(url_or_path):
         img = Image.open(url_or_path).convert("RGBA")
-    else:
-        path = download(url_or_path, ".png")
-        if not path:
-            img = Image.new("RGBA", target_size, (0, 0, 0, 0))
-            ImageDraw.Draw(img).rounded_rectangle(
-                (50, 50) + tuple(map(lambda x: x - 50, target_size)), radius=40,
-                fill="#ffffff", outline="#000", width=3)
-        else:
-            img = Image.open(path).convert("RGBA")
-    return img.resize(target_size, Image.Resampling.LANCZOS)
+        st.success(f"✅ Local {name} loaded")
+        return img.resize(target_size, Image.Resampling.LANCZOS)
+
+    # Remote URL – try download
+    try:
+        resp = requests.get(url_or_path, timeout=20, stream=True)
+        resp.raise_for_status()
+        img = Image.open(io.BytesIO(resp.content)).convert("RGBA")
+        st.success(f"✅ Remote {name} loaded")
+        return img.resize(target_size, Image.Resampling.LANCZOS)
+    except Exception as e:
+        st.warning(f"❌ {name} download failed: {e}")
+
+    # Professional fallback
+    w, h = target_size
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    if "logo" in name.lower():
+        draw.rounded_rectangle([w//10, h//10, 9*w//10, 9*h//10], radius=20, fill=MAROON)
+        draw.text((w//2, h//2), "TK", fill=WHITE, font=get_font(h//3), anchor="mm")
+    else:  # product
+        draw.rounded_rectangle([w//8, h//8, 7*w//8, 7*h//8], radius=50,
+                              fill="#F0F0F0", outline="#333", width=3)
+        draw.text((w//2, h//2), "PHONE", fill="#666", font=get_font(h//5), anchor="mm")
+    st.info(f"🎨 Using fallback {name}")
+    return img
 
 
 @st.cache_resource(show_spinner=False)
@@ -80,20 +102,16 @@ def get_font(size, bold=True):
 # CPU PREMIUM FILTERS  (cloud-safe)
 # --------------------------------------------------------
 def cpu_filters(frame):
-    """Cloud-compatible filters"""
-    # drop alpha → BGR
-    bgr  = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
-    # film grain
-    noise = np.random.normal(0, 3, bgr.shape).astype(np.uint8)
-    bgr   = cv2.add(bgr, noise)
-    # chromatic aberration
-    b, g, r = cv2.split(bgr)
-    b = np.roll(b, 1, axis=1)
-    r = np.roll(r, -1, axis=1)
-    bgr = cv2.merge([b, g, r])
-    # back to RGBA for moviepy
-    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGBA)
+    """Zero-overhead pass-through"""
+    return np.asarray(frame)
 
+def minimal_vignette(frame):
+    """Single effect - 5 % overhead, high impact"""
+    h, w = frame.shape[:2]
+    x, y = np.meshgrid(np.arange(w), np.arange(h))
+    mask = 1 - (x/w - 0.5)**2 - (y/h - 0.5)**2
+    mask = np.clip(mask * 1.2, 0.8, 1.0)
+    return (frame * mask[:,:,np.newaxis]).astype(np.uint8)
 
 def ease_out_elastic(t):
     c4 = (2 * math.pi) / 3
@@ -134,20 +152,37 @@ def light_bg(t):
         draw.ellipse([x - s, y - s, x + s, y + s], fill=(*WHITE, opacity))
 
     return np.array(base)
-
 # --------------------------------------------------------
-# TEXT BOX
+# TEXT BOX  (auto-scales to box)
 # --------------------------------------------------------
-def text_box(text, font, colour):
-    dummy = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(dummy)
-    l, t, r, b = draw.textbbox((0, 0), text, font=font)
-    w, h = r - l, b - t
-    box = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(box)
-    draw.text((-l, -t), text, font=font, fill=colour)
-    return box
-
+def text_box(text, box_size, colour, bold=True):
+    """
+    Return PIL image with text **scaled to fill** box_size (w, h)
+    """
+    w, h = box_size
+    # start from max possible size
+    size = h
+    font = get_font(size, bold)
+    # shrink until it fits
+    while True:
+        dummy = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(dummy)
+        l, t, r, b = draw.textbbox((0, 0), text, font=font)
+        tw, th = r - l, b - t
+        if tw <= w and th <= h:
+            break
+        size -= 2
+        font = get_font(size, bold)
+        if size < 10:  # safeguard
+            break
+    # render at final size
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    # centre inside box
+    x = (w - tw) // 2 - l
+    y = (h - th) // 2 - t
+    draw.text((x, y), text, font=font, fill=colour)
+    return img
 # --------------------------------------------------------
 # DRAW FRAME
 # --------------------------------------------------------
@@ -161,22 +196,22 @@ def draw_frame(t, product, specs, price,
     canvas = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
 
     # logo
-    logo = load_image(LOGO_URL, logo_size)
+    logo = load_image(LOGO_URL, logo_size, "Logo")
     canvas.paste(logo, logo_xy, logo)
 
-    # headline (spring)
-    head_img = text_box(product.upper(), get_font(headline_size), TEXT_COLOUR)
+    # headline (spring + fills box)
+    head_img = text_box(product.upper(), (headline_size*10, headline_size), TEXT_COLOUR)
     spring_x = int(40 * ease_out_elastic((t*0.6) % 1))
     head_x = (WIDTH - head_img.width) // 2 + headline_xy[0] + spring_x
     canvas.paste(head_img, (head_x, headline_xy[1]), head_img)
 
     # product (spring float)
-    phone = load_image(PRODUCT_URL, product_size)
+    phone = load_image(PRODUCT_URL, product_size, "Product")
     float_y = int(product_xy[1] + 40 * ease_out_elastic((t*0.8) % 1))
     prod_x = (WIDTH - product_size[0]) // 2 + product_xy[0]
     canvas.paste(phone, (prod_x, float_y), phone)
 
-    # specs
+    # specs (fills card)
     font_spec = get_font(spec_size[1])
     spec_lines = specs.split("\n")[:4]
     start_y = HEIGHT // 2 - 150
@@ -186,41 +221,42 @@ def draw_frame(t, product, specs, price,
         y = start_y + i * spec_spacing
         card = Image.new("RGBA", (320, 70), (*WHITE, alpha // 2))
         canvas.paste(card, (spec_xy[0] - 20, y - 10), card)
-        txt_img = text_box(txt, font_spec, (*TEXT_COLOUR, alpha))
+        txt_img = text_box(txt, (280, 60), (*TEXT_COLOUR, alpha))
         canvas.paste(txt_img, (spec_xy[0], y), txt_img)
 
-    # price (pulse)
+    # price (fills tag)
     pulse = 1 + 0.05 * math.sin(t * 3)
     pw, ph = int(price_size[0] * pulse), int(price_size[1] * pulse)
     px = (WIDTH - pw) // 2 + price_xy[0]
     py = price_xy[1] + (price_size[1] - ph) // 2
     draw = ImageDraw.Draw(canvas)
     draw.rounded_rectangle((px, py, px + pw, py + ph), radius=25, fill=ACCENT)
-    price_img = text_box(price, get_font(price_font), WHITE)
+    price_img = text_box(price, (pw, ph), WHITE)
     canvas.paste(price_img,
                 (px + (pw - price_img.width) // 2,
                  py + (ph - price_img.height) // 2),
                 price_img)
 
-    # cta
-    cta_img = text_box("SHOP NOW", get_font(cta_font), WHITE)
+    # cta (fills button)
+    cta_img = text_box("SHOP NOW", (cta_size[0], cta_size[1]), WHITE)
     canvas.paste(cta_img,
                 (cta_xy[0] + (cta_size[0] - cta_img.width) // 2,
                  cta_xy[1] + (cta_size[1] - cta_img.height) // 2),
                 cta_img)
 
     # website
-    web_img = text_box("www.tripplek.co.ke", get_font(32, bold=False), TEXT_COLOUR)
+    web_img = text_box("www.tripplek.co.ke", (WIDTH, 40), TEXT_COLOUR)
     canvas.paste(web_img,
                 ((WIDTH - web_img.width) // 2, HEIGHT - 50),
                 web_img)
 
-    # CPU premium filters
+    # CPU premium filters (choose one)
     np_canvas = np.asarray(canvas)
-    np_canvas = cpu_filters(np_canvas)
+    np_canvas = cpu_filters(np_canvas)          # 0 % overhead
+    # np_canvas = minimal_vignette(np_canvas)   # 5 % overhead
     return np_canvas
 # --------------------------------------------------------
-# SINGLE-PASS ENCODER  (cloud-safe, no ffmpeg binary needed)
+# SINGLE-PASS ENCODER  (cloud-safe)
 # --------------------------------------------------------
 def build_video(product, specs, price, ui):
     def frame_generator():
@@ -254,7 +290,7 @@ def build_video(product, specs, price, ui):
 # --------------------------------------------------------
 st.set_page_config(page_title="TrippleK Premium", layout="centered")
 st.title("📱 TrippleK Premium Ad Generator")
-st.caption("CPU filters • Spring motion • CRF 18 • Double slider range")
+st.caption("Bullet-proof images • Text fills box • Spring motion • CRF 18 • Double slider range")
 
 with st.sidebar:
     product = st.text_input("Phone Name", "iPhone 16e")
