@@ -366,12 +366,15 @@ else:
         coords.append((cx + w / 2 * math.cos(θ), cy + h / 2 * math.sin(θ)))
         opacity = int(80 + 50 * math.sin(t * 0.8 + i))
         draw.polygon(coords, fill=(*LIME_GREEN, opacity))
-    # white glints (front)
+# white glints (front)
     for i in range(20):
+        # Glints logic (needs WIDTH, HEIGHT, WHITE)
         x = int(WIDTH * (0.05 + 0.9 * (math.sin(t * 2.1 + i * 2.3) + 1) / 2))
         y = int(HEIGHT * (0.05 + 0.9 * (math.cos(t * 2.3 + i * 1.9) + 1) / 2))
         s = 6 + 4 * math.sin(t * 3 + i)
         opacity = int(200 + 55 * math.sin(t * 4 + i))
         draw.ellipse([x - s, y - s, x + s, y + s], fill=(*WHITE, opacity))
+        
+    # --- FINAL RETURN (This is now correctly inside the function) ---
     return np.array(base)
 
