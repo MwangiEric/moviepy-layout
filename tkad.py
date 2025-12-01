@@ -17,6 +17,13 @@ BG_COLOUR   = (245, 245, 247)  # Apple-like light
 TEXT_COLOUR = (30, 30, 30)     # near-black
 ACCENT      = (153, 0, 0)      # Tripple-K maroon
 
+# Light background + dark text
+BG_COLOUR   = (245, 245, 247)  # Apple-like light
+TEXT_COLOUR = (30, 30, 30)     # near-black
+ACCENT      = (153, 0, 0)      # Tripple-K maroon
+LIME_GREEN  = (50, 205, 50)    # #32CD32
+WHITE       = (255, 255, 255)
+
 # Remote assets (CORS-proxy prefix)
 PROXY = "https://cors.ericmwangi13.workers.dev/url="
 LOGO_URL    = PROXY + "https://www.tripplek.co.ke/wp-content/uploads/2024/10/Tripple-K-Com-Logo-255-by-77.png"
