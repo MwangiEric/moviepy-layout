@@ -5,8 +5,7 @@ import numpy as np
 from moviepy.editor import ImageSequenceClip, AudioFileClip
 import contextlib
 import cv2
-
-
+import base64
 
 # --------------------------------------------------------
 # CONFIG
@@ -16,51 +15,62 @@ FPS, DURATION = 24, 4
 TOTAL_FRAMES  = FPS * DURATION
 
 # Colours
-MAROON      = (153, 0, 0)      # Tripple-K maroon
+MAROON      = (153, 0, 0)
 WHITE       = (255, 255, 255)
 LIME_GREEN  = (50, 205, 50)
 TEXT_COLOUR = (30, 30, 30)
 BG_COLOUR   = (245, 245, 247)
-ACCENT      = (153, 0, 0)      # same as MAROON
+ACCENT      = (153, 0, 0)
+ACCENT_GOLD = "#D4AF37"
 
-# Remote assets (no CORS proxy)
-LOGO_URL    = "https://www.tripplek.co.ke/wp-content/uploads/2024/10/Tripple-K-Com-Logo-255-by-77.png"
-PRODUCT_URL = "https://www.tripplek.co.ke/wp-content/uploads/2025/02/iphone-16e-33.png"
-AUDIO_URL   = "https://ik.imagekit.io/ericmwangi/tech-ambient.mp3?updatedAt=1764372632499"
+# Remote assets (CORS proxy)
+PROXY = "https://cors.ericmwangi13.workers.dev/?url="
+LOGO_URL    = "https://ik.imagekit.io/ericmwangi/tklogo.png?updatedAt=1764543349107"
+PRODUCT_URL = PROXY + "https://www.tripplek.co.ke/wp-content/uploads/2025/02/iphone-16e-33.png"
+AUDIO_URL   = PROXY + "https://ik.imagekit.io/ericmwangi/tech-ambient.mp3?updatedAt=1764372632499"
 
 # --------------------------------------------------------
-# HELPERS
+# MULTI-FORMAT SIZES
 # --------------------------------------------------------
+FORMAT_SIZES = {
+    "TikTok / Reels (9:16)": (1080, 1920),
+    "Instagram (4:5)":       (1080, 1350),
+    "WhatsApp Story (1:1)":  (1080, 1080),
+}
+
+# --------------------------------------------------------
+# BASE64 SESSION CACHE  (download once, reuse forever)
+# --------------------------------------------------------
+
 @st.cache_data(show_spinner=False)
 def download(url, suffix=".png"):
     try:
-        r = requests.get(url, timeout=30)
+        r = requests.get(url, timeout=20)
         if r.status_code == 200:
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
             tmp.write(r.content)
             tmp.close()
             return tmp.name
     except Exception as e:
-        st.warning("Asset download failed – using fallback")
+        st.warning(f"Download failed {url[:30]}…  {e}")
     return None
 
+@st.cache_resource  # ← CHANGE THIS
+def url_to_base64(url, name):
+    try:
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        b64 = base64.b64encode(resp.content).decode()
+        st.session_state[name] = b64
+        return b64
+    except Exception as e:
+        st.warning(f"❌ {name} download failed: {e}")
+        st.session_state[name] = None
+        return None
 
-@st.cache_resource(show_spinner=False)
-def load_image(url_or_path, target_size, name="Image"):
-    if os.path.isfile(url_or_path):
-        img = Image.open(url_or_path).convert("RGBA")
-    else:
-        path = download(url_or_path, ".png")
-        if not path:
-            img = Image.new("RGBA", target_size, (0, 0, 0, 0))
-            ImageDraw.Draw(img).rounded_rectangle(
-                (50, 50) + tuple(map(lambda x: x - 50, target_size)), radius=40,
-                fill="#ffffff", outline="#000", width=3)
-        else:
-            img = Image.open(path).convert("RGBA")
-    return img.resize(target_size, Image.Resampling.LANCZOS)
-
-
+# --------------------------------------------------------
+# FONT HELPERS  (cached)
+# --------------------------------------------------------
 @st.cache_resource(show_spinner=False)
 def _font_bytes(bold=True):
     url = ("https://github.com/google/fonts/raw/main/ofl/inter/" +
@@ -78,16 +88,74 @@ def get_font(size, bold=True):
         except:
             return ImageFont.load_default()
 
+
+def b64_to_pil(b64, target_size, name):
+    """
+    Base64 string → PIL RGBA image.
+    Never crashes, always returns an image.
+    """
+    if b64 is None:
+        st.info(f"🎨 Fallback {name}")
+        return _fallback_image(target_size, name)
+    try:
+        raw = base64.b64decode(b64)
+        img = Image.open(io.BytesIO(raw)).convert("RGBA")
+        st.success(f"✅ {name} loaded")
+        return img.resize(target_size, Image.Resampling.LANCZOS)
+    except Exception as e:
+        st.error(f"❌ {name} decode error: {e}")
+        return _fallback_image(target_size, name)
+
+
+def _fallback_image(size, name):
+    w, h = size
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    if "logo" in name.lower():
+        draw.rounded_rectangle([w//10, h//10, 9*w//10, 9*h//10], radius=20, fill=MAROON)
+        draw.text((w//2, h//2), "TK", fill=WHITE, font=get_font(h//3), anchor="mm")
+    else:
+        draw.rounded_rectangle([w//8, h//8, 7*w//8, 7*h//8], radius=50,
+                              fill="#F0F0F0", outline="#333", width=3)
+        draw.text((w//2, h//2), "PHONE", fill="#666", font=get_font(h//5), anchor="mm")
+    return img
+
+# --------------------------------------------------------
+# FORCE DOWNLOAD ONCE  (visible in sidebar)
+# --------------------------------------------------------
+with st.sidebar:
+    if st.button("🔁 Re-download images"):
+        url_to_base64(LOGO_URL, "logo_b64")
+        url_to_base64(PRODUCT_URL, "product_b64")
+        st.rerun()
+
+# auto-download on first run
+if "logo_b64" not in st.session_state:
+    url_to_base64(LOGO_URL, "logo_b64")
+if "product_b64" not in st.session_state:
+    url_to_base64(PRODUCT_URL, "product_b64")
+
+
+# --------------------------------------------------------
+# CPU FILTERS  (choose one)
+# --------------------------------------------------------
 def cpu_filters(frame):
-    """No processing – original colours"""
+    """Zero overhead – original colours"""
     return frame
+
+def minimal_vignette(frame):
+    h, w = frame.shape[:2]
+    x, y = np.meshgrid(np.arange(w), np.arange(h))
+    mask = 1 - (x/w - 0.5)**2 - (y/h - 0.5)**2
+    mask = np.clip(mask * 1.2, 0.8, 1.0)
+    return (frame * mask[:,:,np.newaxis]).astype(np.uint8)
 
 def ease_out_elastic(t):
     c4 = (2 * math.pi) / 3
     return pow(2, -10 * t) * math.sin((t * 10 - 0.75) * c4) + 1
 
 # --------------------------------------------------------
-# LIGHT BACKGROUND
+# LIGHT ANIMATED BACKGROUND  (your original)
 # --------------------------------------------------------
 def light_bg(t):
     base = Image.new("RGB", (WIDTH, HEIGHT), BG_COLOUR)
@@ -123,7 +191,36 @@ def light_bg(t):
     return np.array(base)
 
 # --------------------------------------------------------
-# TEXT BOX
+# DYNAMIC TEXT SPLITTING  (auto-wrap to width)
+# --------------------------------------------------------
+def split_text_dynamic(text, font, max_width):
+    words = text.split()
+    lines, cur = [], []
+    for w in words:
+        test = ' '.join(cur + [w])
+        if font.getbbox(test)[2] <= max_width:
+            cur.append(w)
+        else:
+            if cur: lines.append(' '.join(cur))
+            cur = [w]
+    if cur: lines.append(' '.join(cur))
+    return lines
+
+# --------------------------------------------------------
+# AUTO-TITLE FONT  (fits any car/phone name)
+# --------------------------------------------------------
+@st.cache_resource
+def adjust_title_font(text, max_width, bold=True, start=200, min_sz=45):
+    size = start
+    while size >= min_sz:
+        font = get_font(size, bold)
+        if font.getbbox(text)[2] <= max_width:
+            return font
+        size -= 2
+    return get_font(min_sz, bold)
+
+# --------------------------------------------------------
+# TEXT BOX  (scale to box)
 # --------------------------------------------------------
 def text_box(text, font, colour):
     dummy = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
@@ -136,60 +233,61 @@ def text_box(text, font, colour):
     return box
 
 # --------------------------------------------------------
-# DRAW FRAME
+# DRAW FRAME  (multi-format + dynamic text)
 # --------------------------------------------------------
 def draw_frame(t, product, specs, price,
                logo_size, logo_xy, product_size, product_xy,
                headline_size, headline_xy, spec_size, spec_xy, spec_spacing,
                price_size, price_xy, price_font,
-               cta_size, cta_xy, cta_font):
+               cta_size, cta_xy, cta_font, fmt="TikTok / Reels (9:16)"):
+
+    w, h = FORMAT_SIZES[fmt]
     rgb  = light_bg(t)
     base = Image.fromarray(rgb).convert("RGBA")
-    canvas = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+    canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
 
-    # logo
-    logo = load_image(LOGO_URL, logo_size)
+    # logo (base64 – never crashes)
+    logo = b64_to_pil(st.session_state.get("logo_b64"), logo_size, "Logo")
     canvas.paste(logo, logo_xy, logo)
 
-    # headline (spring)
-    head_img = text_box(product.upper(), get_font(headline_size), TEXT_COLOUR)
-    spring_x = int(40 * ease_out_elastic((t*0.6) % 1))
-    head_x = (WIDTH - head_img.width) // 2 + headline_xy[0] + spring_x
-    canvas.paste(head_img, (head_x, headline_xy[1]), head_img)
-
-    # product (spring float)
-    phone = load_image(PRODUCT_URL, product_size)
-    float_y = int(product_xy[1] + 40 * ease_out_elastic((t*0.8) % 1))
-    prod_x = (WIDTH - product_size[0]) // 2 + product_xy[0]
+    # product (base64 – never crashes)
+    phone = b64_to_pil(st.session_state.get("product_b64"), product_size, "Product")
+    float_y = int(product_xy[1] + 15 * math.sin(t * 1.1))
+    prod_x = (w - product_size[0]) // 2 + product_xy[0]
     canvas.paste(phone, (prod_x, float_y), phone)
 
-    # specs
-    font_spec = get_font(spec_size[1])
-    spec_lines = specs.split("\n")[:4]
-    start_y = HEIGHT // 2 - 150
-    for i, txt in enumerate(spec_lines):
+    # TITLE – auto-fit font + centre
+    title_font = adjust_title_font(product.upper(), w - 200, bold=True)
+    title_img  = text_box(product.upper(), title_font, ACCENT_GOLD)
+    title_x    = (w - title_img.width) // 2 + headline_xy[0]
+    canvas.paste(title_img, (title_x, headline_xy[1]), title_img)
+
+    # SPECS – auto-wrap + centre
+    spec_lines = split_text_dynamic(specs, get_font(spec_size[1]), 310)
+    start_y = h // 2 - 150
+    for i, line in enumerate(spec_lines[:4]):
         alpha = int(255 * min(1, max(0, (t - 0.5 - i * 0.2) * 2)))
         if alpha <= 0: continue
         y = start_y + i * spec_spacing
         card = Image.new("RGBA", (320, 70), (*WHITE, alpha // 2))
         canvas.paste(card, (spec_xy[0] - 20, y - 10), card)
-        txt_img = text_box(txt, font_spec, (*TEXT_COLOUR, alpha))
+        txt_img = text_box(line, get_font(spec_size[1]), (*TEXT_COLOUR, alpha))
         canvas.paste(txt_img, (spec_xy[0], y), txt_img)
 
-    # price (pulse)
+    # PRICE – pulse
     pulse = 1 + 0.05 * math.sin(t * 3)
     pw, ph = int(price_size[0] * pulse), int(price_size[1] * pulse)
-    px = (WIDTH - pw) // 2 + price_xy[0]
+    px = (w - pw) // 2 + price_xy[0]
     py = price_xy[1] + (price_size[1] - ph) // 2
     draw = ImageDraw.Draw(canvas)
-    draw.rounded_rectangle((px, py, px + pw, py + ph), radius=25, fill=ACCENT)
+    draw.rounded_rectangle((px, py, px + pw, py + ph), radius=25, fill=(*ACCENT, 255))
     price_img = text_box(price, get_font(price_font), WHITE)
     canvas.paste(price_img,
                 (px + (pw - price_img.width) // 2,
                  py + (ph - price_img.height) // 2),
                 price_img)
 
-    # cta
+    # CTA – fills button
     cta_img = text_box("SHOP NOW", get_font(cta_font), WHITE)
     canvas.paste(cta_img,
                 (cta_xy[0] + (cta_size[0] - cta_img.width) // 2,
@@ -199,26 +297,25 @@ def draw_frame(t, product, specs, price,
     # website
     web_img = text_box("www.tripplek.co.ke", get_font(32, bold=False), TEXT_COLOUR)
     canvas.paste(web_img,
-                ((WIDTH - web_img.width) // 2, HEIGHT - 50),
+                ((w - web_img.width) // 2, h - 50),
                 web_img)
 
-    # keep original RGBA – no BGR/RGB round-trip
+    # NO colour-space crash – keep original RGBA
     np_canvas = np.asarray(canvas)
     np_canvas = cpu_filters(np_canvas)   # optional grain
-    return np_canvas
+    return Image.alpha_composite(base, Image.fromarray(np_canvas, "RGBA"))
 # --------------------------------------------------------
-# SINGLE-PASS ENCODER  (cloud-safe, no ffmpeg binary needed)
+# MULTI-FORMAT EXPORT  (TikTok / IG / WhatsApp)
 # --------------------------------------------------------
-def build_video(product, specs, price, ui):
-    def frame_generator():
-        for i in range(TOTAL_FRAMES):
-            yield draw_frame(i / FPS, product, specs, price, **ui)
-
+def build_video(product, specs, price, ui, fmt="TikTok / Reels (9:16)"):
+    w, h = FORMAT_SIZES[fmt]
+    frames = []
     bar = st.progress(0)
-    clip = ImageSequenceClip([f for f in frame_generator()], fps=FPS)
-    bar.progress(TOTAL_FRAMES)
+    for i in range(TOTAL_FRAMES):
+        frames.append(np.asarray(draw_frame(i / FPS, product, specs, price, **ui, fmt=fmt)))
+        bar.progress((i + 1) / TOTAL_FRAMES)
 
-    # optional audio
+    clip = ImageSequenceClip(frames, fps=FPS)
     audio_path = download(AUDIO_URL, ".mp3")
     if audio_path and os.path.isfile(audio_path):
         with contextlib.closing(AudioFileClip(audio_path)) as aclip:
@@ -236,21 +333,23 @@ def build_video(product, specs, price, ui):
     del clip
     gc.collect()
     return tmp.name
+
 # --------------------------------------------------------
-# UI  (DOUBLE-RANGE SLIDERS)
+# UI  (with format picker)
 # --------------------------------------------------------
-st.set_page_config(page_title="TrippleK Premium", layout="centered")
-st.title("📱 TrippleK Premium Ad Generator")
-st.caption("CPU filters • Spring motion • CRF 18 • Double slider range")
+st.set_page_config(page_title="TrippleK Ad Studio", layout="centered")
+st.title("📱 TrippleK Multi-Format Ad Generator")
+st.caption("Base64 cache • Auto-wrap text • Auto-title font • 9:16 / 4:5 / 1:1")
 
 with st.sidebar:
+    st.subheader("✏️ Text & Sizes")
     product = st.text_input("Phone Name", "iPhone 16e")
     specs   = st.text_area("Specs (1 per line)",
                           "A18 Bionic Chip\n48 MP Camera\n256 GB Storage\n20 % Off",
                           height=120)
     price   = st.text_input("Price text", "KSh 145,000")
 
-    st.subheader("🎚️ Layout Sliders (Premium Range)")
+    st.subheader("🎚️ Layout Sliders")
     # logo
     logo_w  = st.slider("Logo width",  200, 1200, 420, 10)
     logo_h  = st.slider("Logo height", 60,  400, 100, 10)
@@ -283,9 +382,12 @@ with st.sidebar:
     cta_y  = st.slider("CTA Y", HEIGHT-500, HEIGHT-50, HEIGHT-180, 10)
     cta_font = st.slider("CTA font size", 14, 150, 46, 2)
 
-    export = st.button("🚀 Generate Premium MP4", type="primary", use_container_width=True)
+    # format picker
+    format_choice = st.selectbox("📱 Export Format", list(FORMAT_SIZES.keys()), index=0)
 
-# Pack UI
+    export = st.button("🚀 Generate Multi-Format MP4", type="primary", use_container_width=True)
+
+# Pack UI dict
 ui_pack = {
     "logo_size": (logo_w, logo_h),
     "logo_xy": (logo_x, logo_y),
@@ -309,11 +411,11 @@ if export:
     if not product.strip():
         st.error("Add a product name!")
         st.stop()
-    with st.spinner("Rendering premium ad..."):
-        path = build_video(product, specs, price, ui_pack)
-    st.success("✅ Premium ad ready!")
+    with st.spinner("Rendering multi-format ad..."):
+        path = build_video(product, specs, price, ui_pack, format_choice)
+    st.success("✅ Multi-format ad ready!")
     with open(path, "rb") as f:
-        st.download_button("⬇️ Download MP4", f, file_name="TrippleK_Premium.mp4", use_container_width=True)
+        st.download_button("⬇️ Download MP4", f, file_name=f"TrippleK_{format_choice.replace(' ', '_')}.mp4", use_container_width=True)
     st.video(path)
     try:
         os.remove(path)
@@ -321,5 +423,5 @@ if export:
         pass
     gc.collect()
 else:
-    preview = np.asarray(draw_frame(1.0, product, specs, price, **ui_pack))
+    preview = np.asarray(draw_frame(1.0, product, specs, price, **ui_pack, fmt=format_choice))
     st.image(preview, use_column_width=True)
