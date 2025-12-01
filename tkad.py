@@ -6,6 +6,8 @@ from moviepy.editor import ImageSequenceClip, AudioFileClip
 import contextlib
 import cv2
 
+
+
 # --------------------------------------------------------
 # CONFIG
 # --------------------------------------------------------
@@ -76,19 +78,9 @@ def get_font(size, bold=True):
         except:
             return ImageFont.load_default()
 
-# --------------------------------------------------------
-# CPU PREMIUM FILTERS  (cloud-safe)
-# --------------------------------------------------------
 def cpu_filters(frame):
-    """Cloud-compatible filters"""
-    # subtle film grain
-    noise = np.random.normal(0, 3, frame.shape).astype(np.uint8)
-    frame = cv2.add(frame, noise)
-    # chromatic aberration
-    b, g, r = cv2.split(frame)
-    b = np.roll(b, 1, axis=1)
-    r = np.roll(r, -1, axis=1)
-    return cv2.merge([b, g, r])
+    """No processing – original colours"""
+    return frame
 
 def ease_out_elastic(t):
     c4 = (2 * math.pi) / 3
@@ -210,9 +202,9 @@ def draw_frame(t, product, specs, price,
                 ((WIDTH - web_img.width) // 2, HEIGHT - 50),
                 web_img)
 
-    # CPU premium filters
+    # keep original RGBA – no BGR/RGB round-trip
     np_canvas = np.asarray(canvas)
-    np_canvas = cpu_filters(np_canvas)
+    np_canvas = cpu_filters(np_canvas)   # optional grain
     return np_canvas
 # --------------------------------------------------------
 # SINGLE-PASS ENCODER  (cloud-safe, no ffmpeg binary needed)
