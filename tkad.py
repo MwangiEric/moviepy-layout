@@ -337,7 +337,7 @@ def build_video(product, specs, price, ui, fmt="TikTok / Reels (9:16)"):
 # --------------------------------------------------------
 # UI  (with format picker)
 # --------------------------------------------------------
-st.set_page_config(page_title="TrippleK Ad Studio", layout="centered")
+
 st.title("📱 TrippleK Multi-Format Ad Generator")
 st.caption("Base64 cache • Auto-wrap text • Auto-title font • 9:16 / 4:5 / 1:1")
 
