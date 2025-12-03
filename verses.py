@@ -213,7 +213,7 @@ with col1:
 
 # Caption generator
 st.markdown("### 📱 Optimized Caption")
-caption = f"'{hook}'
+caption = "'{hook}'
 
 '{verse}'
 
@@ -221,7 +221,7 @@ caption = f"'{hook}'
 
 👇 Type AMEN if this speaks to you 🙏
 
-#BibleVerse #DailyDevotion #FaithJourney""
+#BibleVerse #DailyDevotion #FaithJourney"
 st.code(caption, language="")
 
 st.markdown("---")
