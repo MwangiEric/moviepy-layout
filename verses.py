@@ -1,7 +1,7 @@
-# app.py  –  Verse Poster Generator  (Pillow 10+, border rotation + particles)
+# app.py  –  Verse Poster Generator  (Pillow 10+, border rotate + particles, no GIF)
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, PngImagePlugin
-import textwrap, io, os, requests, colorsys, random
+import textwrap, io, os, requests, colorsys, random, math
 
 ########################  CONFIG  ########################
 W, H = 1080, 1080
@@ -91,17 +91,16 @@ def draw_frame(particles, grad_colours, hook, verse, ref, high_contrast):
     # ---- rotating border 50 px outside text ----
     center_x = W // 2
     center_y = y_verse
-    text_h_tot = hook_h + v_h + ref_h + 120  # vertical span
-    angle = particles[0]["angle"]  # first particle drives rotation
-    from math import sin, cos, radians
+    text_h_tot = hook_h + v_h + ref_h + 120
+    angle = particles[0]["angle"]
     pts = []
     for a in range(0, 360, 10):
-        x = center_x + cos(radians(a + angle)) * (text_h_tot // 2 + 50)
-        y = center_y + sin(radians(a + angle)) * (text_h_tot // 2 + 50)
+        x = center_x + math.cos(math.radians(a + angle)) * (text_h_tot // 2 + 50)
+        y = center_y + math.sin(math.radians(a + angle)) * (text_h_tot // 2 + 50)
         pts.append((x, y))
     draw.polygon(pts, outline=(255, 255, 255, 180), width=3)
 
-    # ---- particles ----
+    # ---- particles (still) ----
     for p in particles:
         x = int(p["x"])
         y = int(p["y"])
@@ -119,22 +118,6 @@ def draw_frame(particles, grad_colours, hook, verse, ref, high_contrast):
     img = Image.blend(img, noise, 0.02)
     return img
 
-def generate_gif(hook, verse, ref, high_contrast, frames=12):
-    grad_colours = COLOUR_ACCESS if high_contrast else COLOUR_BRIGHT
-    particles = [{"x": random.randint(50, W-50), "y": random.randint(50, H-50),
-                  "radius": random.randint(2, 5), "alpha": random.randint(80, 180),
-                  "angle": random.randint(0, 360)} for _ in range(PARTICLE_COUNT)]
-    imgs = []
-    for i in range(frames):
-        for p in particles:
-            p["angle"] += 2
-            p["alpha"] = max(20, p["alpha"] - 3) if i % 3 == 0 else p["alpha"]
-        frame = draw_frame(particles, grad_colours, hook, verse, ref, high_contrast)
-        imgs.append(frame)
-    buf = io.BytesIO()
-    imgs[0].save(buf, format="GIF", save_all=True, append_images=imgs[1:], duration=80, loop=0)
-    return buf
-
 ########################  UI  ########################
 st.set_page_config(page_title="Verse Poster", page_icon="✨", layout="centered")
 st.title("✨ Verse Poster Generator")
@@ -150,37 +133,33 @@ with col2:
     ref   = st.text_input("Verse reference", value=st.session_state.ref)
     hook  = st.text_input("Hook question",  value=st.session_state.hook)
     contrast = st.toggle("High-contrast mode", value=False)
-    gif = st.checkbox("Add subtle particle GIF", value=True)
+    particles_on = st.checkbox("Subtle particles + rotating border", value=True)
 
     # ---------- LIVE PREVIEW ----------
     if any([ref, hook]):
         with st.spinner("Preview…"):
             verse_text = fetch_verse(ref)
-            still = draw_frame([{"x": 0, "y": 0, "radius": 0, "alpha": 0, "angle": 0}],
-                               COLOUR_ACCESS if contrast else COLOUR_BRIGHT, hook, verse_text, ref, contrast)
-            st.image(still, use_column_width=True)
+            particles = [{"x": random.randint(50, W-50), "y": random.randint(50, H-50),
+                          "radius": random.randint(2, 5), "alpha": random.randint(80, 180),
+                          "angle": 0} for _ in range(PARTICLE_COUNT)] if particles_on else []
+            preview = draw_frame(particles, COLOUR_ACCESS if contrast else COLOUR_BRIGHT, hook, verse_text, ref, contrast)
+            st.image(preview, use_column_width=True)
 
-    # ---------- DOWNLOADS ----------
-    if st.button("Generate Final Assets", type="primary"):
+    # ---------- DOWNLOAD ----------
+    if st.button("Generate Final PNG", type="primary"):
         verse_text = fetch_verse(ref)
-        still = draw_frame([{"x": 0, "y": 0, "radius": 0, "alpha": 0, "angle": 0}],
-                           COLOUR_ACCESS if contrast else COLOUR_BRIGHT, hook, verse_text, ref, contrast)
+        particles = [{"x": random.randint(50, W-50), "y": random.randint(50, H-50),
+                      "radius": random.randint(2, 5), "alpha": random.randint(80, 180),
+                      "angle": 0} for _ in range(PARTICLE_COUNT)] if particles_on else []
+        final = draw_frame(particles, COLOUR_ACCESS if contrast else COLOUR_BRIGHT, hook, verse_text, ref, contrast)
         buf = io.BytesIO()
         meta = PngImagePlugin.PngInfo()
         meta.add_text("Title", f"Verse: {ref}")
-        still.save(buf, format="PNG", optimize=True, compress_level=COMPRESS_LVL, pnginfo=meta)
-        st.download_button(label="⬇️ PNG",
+        final.save(buf, format="PNG", optimize=True, compress_level=COMPRESS_LVL, pnginfo=meta)
+        st.download_button(label="⬇️ PNG (with effects)",
                            data=buf.getvalue(),
                            file_name=f"poster_{ref.replace(' ','_')}.png",
                            mime="image/png")
-
-        if gif:
-            gif_buf = generate_gif(hook, verse_text, ref, contrast)
-            st.download_button(label="⬇️ GIF (particles)",
-                               data=gif_buf.getvalue(),
-                               file_name=f"verse_{ref.replace(' ','_')}.gif",
-                               mime="image/gif")
-
         caption = f"Verse: {ref}\nHook: {hook}\n#BibleVerse #EncourageOthers"
         st.code(caption, language=None)
         st.button("📋 Copy caption", on_click=lambda: st.write("✅ Copied!"))
