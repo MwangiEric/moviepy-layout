@@ -213,11 +213,11 @@ with col1:
 
 # Caption generator
 st.markdown("### 📱 Optimized Caption")
-caption = f"{hook}
+caption = f"'{hook}'
 
 '{verse}'
 
-{ref}
+'{ref}'
 
 👇 Type AMEN if this speaks to you 🙏
 
