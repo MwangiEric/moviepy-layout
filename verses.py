@@ -253,11 +253,7 @@ with col_right:
 # =====================================================
 st.markdown("### 📱 Social Media Caption")
 if 'verse' in locals():
-    caption = hook + "
-
-"" + verse + ""
-
-" + ref + "
+    caption = "pray"
 
 👇 Type AMEN if this speaks to you 🙏
 
