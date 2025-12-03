@@ -160,12 +160,7 @@ def generate_poster(template="minimal", palette="light", ref="Psalm 46:1", hook=
 
 # =====================================================
 # STREAMLIT UI - PROFESSIONAL INTERFACE
-# =====================================================
-st.set_page_config(page_title="✨ Verse Studio Pro", layout="wide", page_icon="✝️")
-st.markdown("""
-# ✝️ Verse Studio Pro
-**Professional Bible Verse Graphics** • Reels • Stories • Posts
-""")
+
 
 # Sidebar controls
 with st.sidebar:
