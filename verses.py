@@ -1,7 +1,7 @@
-# app.py  –  Verse Poster Generator  (Streamlit Cloud, live preview)
+# app.py  –  Verse Poster Generator  (Pillow 10+, border rotation + particles)
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, PngImagePlugin
-import textwrap, io, os, requests, colorsys
+import textwrap, io, os, requests, colorsys, random
 
 ########################  CONFIG  ########################
 W, H = 1080, 1080
@@ -15,6 +15,7 @@ FONT_SIZE_HOOK = 80
 FONT_SIZE_VERSE = 110
 FONT_SIZE_REF  = 42
 COMPRESS_LVL   = 9
+PARTICLE_COUNT = 40   # per frame
 ##########################################################
 
 @st.cache_data(show_spinner=False)
@@ -62,77 +63,77 @@ def fit_textbox(draw, text, max_w, max_h, start=110):
         wrapper = textwrap.TextWrapper(width=int(max_w / (size * 0.6)))
         lines = wrapper.wrap(text)
         block = "\n".join(lines)
-        w, h = text_size(draw, block, font)
+        l, t, r, b = draw.textbbox((0, 0), block, font=font)
+        w, h = r - l, b - t
         if w <= max_w and h <= max_h:
             return font, lines
         size -= 4
     return ImageFont.load_default(), textwrap.wrap(text, 35)
 
-def draw_card(hook: str, verse: str, ref: str, high_contrast: bool,
-              parallax: bool, glass: bool, foil: bool, burst: bool, hue_shift: int):
-    grad_colours = COLOUR_ACCESS if high_contrast else COLOUR_BRIGHT
-    if hue_shift:
-        grad_colours = shift_hue(grad_colours, hue_shift)
-
+def draw_frame(particles, grad_colours, hook, verse, ref, high_contrast):
     img = duotone_gradient(W, H, *grad_colours)
     draw = ImageDraw.Draw(img, "RGBA")
 
-    if parallax:
-        tilt = 4
-        poly = [(MARGIN_OUT-tilt, H-MARGIN_OUT), (W-MARGIN_OUT+tilt, H-MARGIN_OUT),
-                (W-MARGIN_OUT, MARGIN_OUT), (MARGIN_OUT, MARGIN_OUT)]
-        draw.polygon(poly, fill=(0, 0, 0, 180))
-    draw.rectangle([MARGIN_OUT, MARGIN_OUT, W-MARGIN_OUT, H-MARGIN_OUT], fill=(0, 0, 0, 180))
-
-    if glass:
-        crop = img.crop((MARGIN_OUT, MARGIN_OUT, W-MARGIN_OUT, H-MARGIN_OUT))
-        crop = crop.filter(ImageFilter.GaussianBlur(12))
-        crop = Image.blend(crop, Image.new("RGB", crop.size, (0, 0, 0)), 0.45)
-        img.paste(crop, (MARGIN_OUT, MARGIN_OUT))
-
-    draw.rectangle([MARGIN_OUT-10, MARGIN_OUT-10, W-MARGIN_OUT+10, H-MARGIN_OUT+10], fill=(255, 255, 255, 255))
-    shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    draw_s = ImageDraw.Draw(shadow)
-    draw_s.rectangle([MARGIN_OUT, MARGIN_OUT, W-MARGIN_OUT, H-MARGIN_OUT], fill=(0, 0, 0, 40))
-    shadow = shadow.filter(ImageFilter.GaussianBlur(3))
-    img = Image.alpha_composite(img.convert("RGBA"), shadow)
-    draw = ImageDraw.Draw(img, "RGBA")
-    draw.rectangle([MARGIN_OUT, MARGIN_OUT, W-MARGIN_OUT, H-MARGIN_OUT], fill=(0, 0, 0, 180))
-
+    # ---- text layout ----
     box_w = W - 2*MARGIN_OUT - 2*PADDING
-    y_hook = int(H * 0.25)
+    y_hook  = int(H * 0.25)
     y_verse = int(H * 0.50)
-    y_ref = int(H * 0.75)
+    y_ref   = int(H * 0.75)
 
     hook_font = FONT_HOOK
     hook_w, hook_h = text_size(draw, hook, hook_font)
-    draw.text((MARGIN_OUT + PADDING + (box_w - hook_w) // 2, y_hook - hook_h // 2),
-              hook, font=hook_font, fill="#ffffff")
-
     verse_font, verse_lines = fit_textbox(draw, f"“{verse}”", box_w, y_ref - y_verse - 60, start=FONT_SIZE_VERSE)
     verse_block = "\n".join(verse_lines)
-    v_w, v_h = draw.multiline_textsize(verse_block, verse_font)
-    burst_y = y_verse - v_h // 2 - (20 if burst else 0)
-    draw.multiline_text((MARGIN_OUT + PADDING + (box_w - v_w) // 2, burst_y),
-                        verse_block, font=verse_font, fill="#ffffff", spacing=12)
+    l, t, r, b = draw.textbbox((0, 0), verse_block, verse_font)
+    v_w, v_h = r - l, b - t
+    ref_w, ref_h = text_size(draw, ref, FONT_REF)
 
-    if foil:
-        foil_img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        draw_f = ImageDraw.Draw(foil_img)
-        ref_w, ref_h = text_size(draw, ref, FONT_REF)
-        x_ref = W - MARGIN_OUT - PADDING - ref_w
-        y_ref_draw = y_ref - ref_h // 2
-        draw_f.text((x_ref, y_ref_draw), ref, font=FONT_REF, fill=(255, 215, 0, 255))
-        foil_img = foil_img.filter(ImageFilter.GaussianBlur(1))
-        foil_img = ImageEnhance.Brightness(foil_img).enhance(1.15)
-        img = Image.alpha_composite(img.convert("RGBA"), foil_img)
-    else:
-        draw.text((W - MARGIN_OUT - PADDING - text_size(draw, ref, FONT_REF)[0], y_ref - text_size(draw, ref, FONT_REF)[1] // 2),
-                  ref, font=FONT_REF, fill="#ffffff")
+    # ---- rotating border 50 px outside text ----
+    center_x = W // 2
+    center_y = y_verse
+    text_h_tot = hook_h + v_h + ref_h + 120  # vertical span
+    angle = particles[0]["angle"]  # first particle drives rotation
+    from math import sin, cos, radians
+    pts = []
+    for a in range(0, 360, 10):
+        x = center_x + cos(radians(a + angle)) * (text_h_tot // 2 + 50)
+        y = center_y + sin(radians(a + angle)) * (text_h_tot // 2 + 50)
+        pts.append((x, y))
+    draw.polygon(pts, outline=(255, 255, 255, 180), width=3)
 
+    # ---- particles ----
+    for p in particles:
+        x = int(p["x"])
+        y = int(p["y"])
+        r = p["radius"]
+        alpha = int(p["alpha"])
+        draw.ellipse([x - r, y - r, x + r, y + r], fill=(255, 255, 255, alpha))
+
+    # ---- text ----
+    draw.text((W // 2 - hook_w // 2, y_hook - hook_h // 2), hook, font=hook_font, fill=TEXT_COLOUR)
+    draw.multiline_text((W // 2 - v_w // 2, y_verse - v_h // 2), verse_block, font=verse_font, fill=TEXT_COLOUR, spacing=12)
+    draw.text((W - MARGIN_OUT - PADDING - ref_w, y_ref - ref_h // 2), ref, font=FONT_REF, fill=TEXT_COLOUR)
+
+    # ---- noise ----
     noise = Image.effect_noise((W, H), 8).convert("RGBA")
     img = Image.blend(img, noise, 0.02)
     return img
+
+def generate_gif(hook, verse, ref, high_contrast, frames=12):
+    grad_colours = COLOUR_ACCESS if high_contrast else COLOUR_BRIGHT
+    particles = [{"x": random.randint(50, W-50), "y": random.randint(50, H-50),
+                  "radius": random.randint(2, 5), "alpha": random.randint(80, 180),
+                  "angle": random.randint(0, 360)} for _ in range(PARTICLE_COUNT)]
+    imgs = []
+    for i in range(frames):
+        for p in particles:
+            p["angle"] += 2
+            p["alpha"] = max(20, p["alpha"] - 3) if i % 3 == 0 else p["alpha"]
+        frame = draw_frame(particles, grad_colours, hook, verse, ref, high_contrast)
+        imgs.append(frame)
+    buf = io.BytesIO()
+    imgs[0].save(buf, format="GIF", save_all=True, append_images=imgs[1:], duration=80, loop=0)
+    return buf
 
 ########################  UI  ########################
 st.set_page_config(page_title="Verse Poster", page_icon="✨", layout="centered")
@@ -149,31 +150,37 @@ with col2:
     ref   = st.text_input("Verse reference", value=st.session_state.ref)
     hook  = st.text_input("Hook question",  value=st.session_state.hook)
     contrast = st.toggle("High-contrast mode", value=False)
-    parallax = st.checkbox("3-D tilt", value=False)
-    glass    = st.checkbox("Glass blur", value=False)
-    foil     = st.checkbox("Gold-foil reference", value=False)
-    burst    = st.checkbox("Break frame (ascender out)", value=False)
-    hue_shift = st.slider("Hue rotate gradient", 0, 360, 0, step=30)
+    gif = st.checkbox("Add subtle particle GIF", value=True)
 
-    # ---------- LIVE PREVIEW every 2 s ----------
+    # ---------- LIVE PREVIEW ----------
     if any([ref, hook]):
         with st.spinner("Preview…"):
             verse_text = fetch_verse(ref)
-            preview = draw_card(hook, verse_text, ref, contrast, parallax, glass, foil, burst, hue_shift)
-            st.image(preview, use_column_width=True)
+            still = draw_frame([{"x": 0, "y": 0, "radius": 0, "alpha": 0, "angle": 0}],
+                               COLOUR_ACCESS if contrast else COLOUR_BRIGHT, hook, verse_text, ref, contrast)
+            st.image(still, use_column_width=True)
 
-    # ---------- FINAL DOWNLOAD ----------
-    if st.button("Generate Final PNG", type="primary"):
+    # ---------- DOWNLOADS ----------
+    if st.button("Generate Final Assets", type="primary"):
         verse_text = fetch_verse(ref)
-        final = draw_card(hook, verse_text, ref, contrast, parallax, glass, foil, burst, hue_shift)
+        still = draw_frame([{"x": 0, "y": 0, "radius": 0, "alpha": 0, "angle": 0}],
+                           COLOUR_ACCESS if contrast else COLOUR_BRIGHT, hook, verse_text, ref, contrast)
         buf = io.BytesIO()
         meta = PngImagePlugin.PngInfo()
         meta.add_text("Title", f"Verse: {ref}")
-        final.save(buf, format="PNG", optimize=True, compress_level=COMPRESS_LVL, pnginfo=meta)
-        st.download_button(label="⬇️ Download PNG",
+        still.save(buf, format="PNG", optimize=True, compress_level=COMPRESS_LVL, pnginfo=meta)
+        st.download_button(label="⬇️ PNG",
                            data=buf.getvalue(),
                            file_name=f"poster_{ref.replace(' ','_')}.png",
                            mime="image/png")
+
+        if gif:
+            gif_buf = generate_gif(hook, verse_text, ref, contrast)
+            st.download_button(label="⬇️ GIF (particles)",
+                               data=gif_buf.getvalue(),
+                               file_name=f"verse_{ref.replace(' ','_')}.gif",
+                               mime="image/gif")
+
         caption = f"Verse: {ref}\nHook: {hook}\n#BibleVerse #EncourageOthers"
         st.code(caption, language=None)
         st.button("📋 Copy caption", on_click=lambda: st.write("✅ Copied!"))
