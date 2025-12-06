@@ -97,9 +97,8 @@ def fetch_verse(book_name: str, chapter: int, verse_num: int) -> str:
         book_enum = BOOK_NAMES_MAP[book_name]
         
         # pythonbible requires a list of verses
-        verse_id = pythonbible.convert_reference_to_verse_ids(
-            [pythonbible.ScripRef(book=book_enum, chapter=chapter, verse=verse_num)]
-        )
+        verse_id = int(f"{book_enum.value}{chapter:03d}{verse_num:03d}")
+verse_text = pythonbible.get_verse_text(verse_id)
         
         # Fetch the text for the verse ID (using King James Version, the default for pythonbible)
         verse_text = pythonbible.get_verse_text(verse_id[0])
