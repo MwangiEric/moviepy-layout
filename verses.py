@@ -2,12 +2,16 @@ import streamlit as st
 from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 import io, os, requests, random, math, time, textwrap
 
-# Streamlit page config (called once)
-st.set_page_config(page_title="✝️ Verse Studio Premium", page_icon="✝️", layout="wide")
-
-# Constants and color palettes
+# --- Configuration Constants ---
 W, H = 1080, 1920  # Canvas size (vertical reels/stories)
 MARGIN = 100
+
+# Helper function to convert hex string to RGB tuple
+def hex_to_rgb(hex_color):
+    """Converts #RRGGBB hex string to (R, G, B) tuple."""
+    return tuple(int(hex_color[i:i+2], 16) for i in (1, 3, 5))
+
+# --- Constants and Color Palettes (RGB only) ---
 PALETTES = {
     "light": [
         {"bg": ["#faf9f6", "#e0e4d5"], "accent": "#c4891f", "text": "#183028"},
@@ -19,6 +23,9 @@ PALETTES = {
     ]
 }
 TEMPLATES = ["Minimal Elegance", "Golden Hour"]
+
+# --- Streamlit Setup ---
+st.set_page_config(page_title="✝️ Verse Studio Premium", page_icon="✝️", layout="wide")
 
 @st.cache_data(ttl=3600)
 def download_font():
@@ -55,56 +62,87 @@ def fetch_verse(ref: str) -> str:
     except:
         return "Verse unavailable"
 
-def create_gradient(w, h, c1, c2):
+# --- Drawing Helpers ---
+
+def get_text_size(font, text):
+    """
+    Helper to get text width and height using the non-deprecated getbbox().
+    Returns (width, height)
+    """
+    # getbbox returns (left, top, right, bottom)
+    if not text:
+        return 0, 0
+    bbox = font.getbbox(text)
+    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+
+def create_gradient(w, h, c1_hex, c2_hex):
     img = Image.new("RGB", (w, h))
     draw = ImageDraw.Draw(img)
+    c1_rgb = hex_to_rgb(c1_hex)
+    c2_rgb = hex_to_rgb(c2_hex)
+    
     for x in range(w):
         ratio = x / w
-        r = int((1-ratio)*int(c1[1:3],16) + ratio*int(c2[1:3],16))
-        g = int((1-ratio)*int(c1[3:5],16) + ratio*int(c2[3:5],16))
-        b = int((1-ratio)*int(c1[5:7],16) + ratio*int(c2[5:7],16))
+        r = int((1-ratio)*c1_rgb[0] + ratio*c2_rgb[0])
+        g = int((1-ratio)*c1_rgb[1] + ratio*c2_rgb[1])
+        b = int((1-ratio)*c1_rgb[2] + ratio*c2_rgb[2])
         draw.line([(x, 0), (x, h)], fill=(r, g, b))
+    
+    # Convert to RGBA for drawing layers on top later
     return img.convert("RGBA")
+
 
 def wrap_text(text, font, max_width):
     words = text.split()
     lines = []
+    current_line = []
+    
     while words:
-        line_words = []
-        while words:
-            line_words.append(words.pop(0))
-            w, _ = font.getsize(" ".join(line_words + words[:1]))
-            if w > max_width:
-                break
-        lines.append(" ".join(line_words))
+        # Check current line + next word
+        test_line = " ".join(current_line + [words[0]])
+        w, _ = get_text_size(font, test_line)
+        
+        if w < max_width:
+            current_line.append(words.pop(0))
+        else:
+            # Current line is full. If it's empty, we have a word that's too wide.
+            if not current_line:
+                # Force wrap the single word (or use textwrap.wrap for safety)
+                lines.append(words.pop(0))
+            else:
+                lines.append(" ".join(current_line))
+                current_line = []
+    
+    if current_line:
+        lines.append(" ".join(current_line))
+        
     return lines
 
-def draw_rounded_rect(draw, xy, radius, fill):
-    draw.rounded_rectangle(xy, radius=radius, fill=fill)
-
-def draw_glow_text(draw, pos, text, font, fill, glow_color):
-    x, y = pos
-    for offset in range(4, 0, -1):
-        draw.text((x + offset, y + offset), text, font=font, fill=glow_color+(50,))
-    draw.text(pos, text, font=font, fill=fill)
 
 def draw_cross(draw, cx, cy, size=100, phase=0):
     pulse = 1 + 0.1 * math.sin(phase)
     lw = int(15 * pulse)
-    draw.line([(cx, cy - size//2), (cx, cy + size//2)], fill=(255, 255, 255, 180), width=lw)
-    draw.line([(cx - size//2, cy), (cx + size//2, cy)], fill=(255,255,255,180), width=lw)
+    # White cross with 180 alpha (semi-transparent)
+    fill_color = (255, 255, 255, 180) 
+    draw.line([(cx, cy - size//2), (cx, cy + size//2)], fill=fill_color, width=lw)
+    draw.line([(cx - size//2, cy), (cx + size//2, cy)], fill=fill_color, width=lw)
+
 
 def generate_poster(template, palette_mode, ref, hook):
     verse_text = fetch_verse(ref)
     pal = random.choice(PALETTES[palette_mode])
+    
+    # Base is RGB, converted to RGBA
     base = create_gradient(W, H, pal["bg"][0], pal["bg"][1])
-    base = base.convert("RGBA")
     draw = ImageDraw.Draw(base)
 
     box_w, box_h = W - 2 * MARGIN, int(H * 0.6)
     box_x, box_y = MARGIN, (H - box_h) // 2
 
-    draw_rounded_rect(draw, [box_x, box_y, box_x + box_w, box_y + box_h], 40, fill=(0,0,0,180) if palette_mode == "dark" else (255,255,255,200))
+    # Draw Text Background Box (Black/White with transparency)
+    box_color = (0, 0, 0, 180) if palette_mode == "dark" else (255, 255, 255, 200)
+    draw.rounded_rectangle([box_x, box_y, box_x + box_w, box_y + box_h], radius=40, fill=box_color)
 
     # Text wrapping inside box with margin
     max_text_width = box_w - 100
@@ -112,36 +150,44 @@ def generate_poster(template, palette_mode, ref, hook):
     verse_lines = wrap_text(f"“{verse_text}”", VERSE_FONT, max_text_width)
     ref_lines = wrap_text(ref, REF_FONT, max_text_width)
 
-    # Calculate total height
-    hook_h_total = len(hook_lines) * HOOK_FONT.getsize("A")[1] + (len(hook_lines)-1)*10
-    verse_h_total = len(verse_lines) * VERSE_FONT.getsize("A")[1] + (len(verse_lines)-1)*8
-    ref_h_total = len(ref_lines) * REF_FONT.getsize("A")[1] + (len(ref_lines)-1)*6
-    total_height = hook_h_total + verse_h_total + ref_h_total + 40
+    # Calculate total height (Using a placeholder height for spacing calculations)
+    hook_h_line = HOOK_FONT.getbbox("A")[3] + 10 # height + 10 margin
+    verse_h_line = VERSE_FONT.getbbox("A")[3] + 8 # height + 8 margin
+    ref_h_line = REF_FONT.getbbox("A")[3] + 6   # height + 6 margin
+    
+    total_height = (len(hook_lines) * hook_h_line) + \
+                   (len(verse_lines) * verse_h_line) + \
+                   (len(ref_lines) * ref_h_line) + 40 # Padding offset
 
     current_y = box_y + (box_h - total_height) // 2
 
-    # Draw hook text
-    hook_color = tuple(int(pal["accent"].lstrip("#")[i:i+2], 16) for i in (0,2,4)) + (255,)
+    # Draw hook text (Accent color, no transparency needed)
+    hook_rgb = hex_to_rgb(pal["accent"])
+    hook_color = (*hook_rgb, 255)
+    
     for line in hook_lines:
-        w, h = HOOK_FONT.getsize(line)
+        w, h = get_text_size(HOOK_FONT, line)
         draw.text(((W - w)//2, current_y), line, font=HOOK_FONT, fill=hook_color)
-        current_y += h + 10
+        current_y += HOOK_FONT.getbbox("A")[3] + 10 # Use baseline height for step
 
     # Draw glowing verse text
-    verse_fill = (255,255,255,255)
-    glow_fill = (100,149,237,150)
+    verse_fill = (255, 255, 255, 255) # White text
+    glow_fill = (100, 149, 237, 150)  # Light Blue/Cornflower Blue for glow with 150 alpha
+    
     for line in verse_lines:
-        w, h = VERSE_FONT.getsize(line)
-        for offset in (1,0,-1):
+        w, h = get_text_size(VERSE_FONT, line)
+        # Simple glow effect: draw transparent glow first
+        for offset in (1, 0, -1):
             draw.text(((W - w)//2 + offset, current_y + offset), line, font=VERSE_FONT, fill=glow_fill)
+        # Draw opaque text on top
         draw.text(((W - w)//2, current_y), line, font=VERSE_FONT, fill=verse_fill)
-        current_y += h + 8
+        current_y += VERSE_FONT.getbbox("A")[3] + 8 # Use baseline height for step
 
     # Draw reference text
     for line in ref_lines:
-        w, h = REF_FONT.getsize(line)
+        w, h = get_text_size(REF_FONT, line)
         draw.text(((W-w)//2, current_y), line, font=REF_FONT, fill=hook_color)
-        current_y += h + 6
+        current_y += REF_FONT.getbbox("A")[3] + 6 # Use baseline height for step
 
     # Animated crosses for golden template
     if template == "Golden Hour":
@@ -151,7 +197,7 @@ def generate_poster(template, palette_mode, ref, hook):
 
     return base, verse_text
 
-# UI controls
+# --- UI controls ---
 st.title("✝️ Verse Studio Premium")
 palette_mode = st.selectbox("Palette Mode", ["light", "dark"])
 template = st.selectbox("Template Style", TEMPLATES)
@@ -168,5 +214,4 @@ st.download_button("⬇️ Download Poster PNG", data=buf.getvalue(), file_name=
 
 st.text_area("Copy Caption for Social Media", "Reflections", height=150)
 
-# Placeholder for future video output
-st.info("🎥 Video output with animations coming soon!")
+st.info("🎥 Video output with animations coming soon! (The Golden Hour crosses animate on every refresh.)")
