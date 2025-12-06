@@ -49,7 +49,7 @@ BG_ANIMATIONS = ["None", "Cross Orbit (Geometric)", "Wave Flow (Abstract)", "Flo
 # BIBLE DATA (Simplified for Selection)
 # We need to map our names to pythonbible's format for fetching
 BOOK_NAMES_MAP = {
-    "Psalm": pythonbible.Book.PSALM, 
+    "Psalms": pythonbible.Book.PSALMS, 
     "John": pythonbible.Book.JOHN,
     "Romans": pythonbible.Book.ROMANS
 }
