@@ -166,13 +166,7 @@ buf = io.BytesIO()
 poster_img.save(buf, format="PNG")
 st.download_button("⬇️ Download Poster PNG", data=buf.getvalue(), file_name=f"verse_{ref.replace(' ', '_')}.png", mime="image/png")
 
-# Caption fixed without f-string errors
-caption_text = "Reflections
-
-👇 Type AMEN if this speaks to you 🙏
-
-#BibleVerse #DailyDevotion #FaithJourney"
-st.text_area("Copy Caption for Social Media", caption_text, height=150)
+st.text_area("Copy Caption for Social Media", "Reflections", height=150)
 
 # Placeholder for future video output
 st.info("🎥 Video output with animations coming soon!")
