@@ -167,11 +167,7 @@ poster_img.save(buf, format="PNG")
 st.download_button("⬇️ Download Poster PNG", data=buf.getvalue(), file_name=f"verse_{ref.replace(' ', '_')}.png", mime="image/png")
 
 # Caption fixed without f-string errors
-caption_text = hook + "
-
-"" + verse_text + ""
-
-" + ref + "
+caption_text = "Reflections
 
 👇 Type AMEN if this speaks to you 🙏
 
