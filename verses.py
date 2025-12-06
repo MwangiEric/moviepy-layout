@@ -1,7 +1,7 @@
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 import io, os, requests, math, time
-from moviepy.editor import VideoClip, CompositeVideoClip, AudioFileFileClip, VideoFileClip, vfx # Corrected: AudioFileClip
+from moviepy.editor import VideoClip, CompositeVideoClip, AudioFileClip, VideoFileClip, vfx
 import numpy as np
 
 # --- 0. STREAMLIT CONFIGURATION ---
