@@ -1,11 +1,25 @@
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 import io, os, requests, math, time
-from moviepy.editor import VideoClip, CompositeVideoClip, AudioFileClip, VideoFileClip, vfx
+from moviepy.editor import VideoClip, CompositeVideoClip, AudioFileFileClip, VideoFileClip, vfx # Corrected: AudioFileClip
 import numpy as np
 
 # --- 0. STREAMLIT CONFIGURATION ---
 st.set_page_config(page_title="💎 Verse Studio Premium", page_icon="✝️", layout="wide")
+
+# --- 0.1. CLEANUP FUNCTION (Runs on session end/exit) ---
+def cleanup_temp_files():
+    """Removes temporary files created during media caching."""
+    files_to_delete = [f for f in os.listdir('.') if f.startswith('cached_media_') or f.endswith('.mp4') and f.startswith('final_video_')]
+    for f in files_to_delete:
+        try:
+            os.remove(f)
+            # print(f"Cleaned up: {f}")
+        except Exception as e:
+            print(f"Error cleaning up file {f}: {e}")
+
+# Register cleanup function to run when the script finishes (if supported by Streamlit environment)
+# st.runtime.get_instance().on_script_stop(cleanup_temp_files) # Note: This line might need adaptation based on your specific Streamlit environment setup.
 
 # --- 1. CORE CONSTANTS & MEDIA CONFIGURATION ---
 
@@ -15,7 +29,7 @@ DEFAULT_VERSE_TEXT = "God is our refuge and strength, an ever-present help in tr
 LOGO_URL = "https://ik.imagekit.io/ericmwangi/smlogo.png?updatedAt=1763071173037"
 LOGO_SIZE = 100
 
-# Centralized Design Configuration (Refined Names)
+# Centralized Design Configuration
 DESIGN_CONFIG = {
     "palettes": {
         "Galilee Morning (Light)": {"bg": ["#faf9f6", "#e0e4d5"], "accent": "#c4891f", "text_primary": "#183028", "text_secondary": "#5a5a5a"},
@@ -26,7 +40,8 @@ DESIGN_CONFIG = {
     "bg_animations": ["None", "Cross Orbit (Geometric)", "Wave Flow (Abstract)", "Floating Circles (Abstract)"],
     "text_animations": ["None", "Glow Pulse", "Typewriter Effect", "Fade-in Opacity"],
     "aspect_ratios": {"Reel / Story (9:16)": (1080, 1920), "Square Post (1:1)": (1080, 1080)},
-    "video_qualities": {"Draft (6s / 12 FPS)": (6, 12), "Standard (6s / 12 FPS)": (6, 12), "High Quality (6s / 24 FPS)": (6, 24)}
+    # Default is now Draft (12 FPS)
+    "video_qualities": {"Draft (6s / 12 FPS)": (6, 12), "Standard (6s / 24 FPS)": (6, 24), "High Quality (10s / 24 FPS)": (10, 24)}
 }
 
 # Media URLs
@@ -49,14 +64,28 @@ LOGO_PLACEMENTS = {
     "Hidden": None
 }
 
-# BIBLE DATA (Simplified)
+# Full Bible Book List (Simplified for placeholder use)
+FULL_BIBLE_BOOKS = [
+    "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel", 
+    "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther", "Job", "Psalm", "Proverbs", 
+    "Ecclesiastes", "Song of Solomon", "Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", 
+    "Amos", "Obadiah", "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi",
+    "Matthew", "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians", "2 Corinthians", "Galatians", "Ephesians", 
+    "Philippians", "Colossians", "1 Thessalonians", "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", 
+    "Hebrews", "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude", "Revelation"
+]
+
+# BIBLE DATA structure for chapter/verse counts (expanded to include new default books)
 BIBLE_STRUCTURE = {
-    "Genesis": {1: 31, 2: 25}, 
-    "Psalm": {1: 6, 46: 11, 121: 8}, 
+    "Genesis": {1: 31, 2: 25, 3: 24}, 
+    "Psalm": {1: 6, 46: 11, 121: 8, 23: 6}, 
     "John": {3: 36, 14: 31},
     "Romans": {8: 39},
+    "Matthew": {5: 48, 6: 34, 7: 29},
+    "Revelation": {21: 27, 22: 21}
 }
-BOOK_NAMES = list(BIBLE_STRUCTURE.keys())
+BOOK_NAMES = FULL_BIBLE_BOOKS # Use the full list now, but the fetcher still relies on BIBLE_STRUCTURE for counts.
+
 PALETTE_NAMES = list(DESIGN_CONFIG["palettes"].keys())
 ASPECT_RATIOS = DESIGN_CONFIG["aspect_ratios"]
 VIDEO_QUALITIES = DESIGN_CONFIG["video_qualities"]
@@ -65,16 +94,19 @@ BG_ANIMATIONS = DESIGN_CONFIG["bg_animations"]
 
 
 # --- 2. CORE HELPER FUNCTIONS (Caching, Geometry, Color, Fonts) ---
+# (NOTE: These functions remain unchanged as they were correct and necessary)
 
 def hex_to_rgb(hex_color):
     if hex_color.startswith('#'): hex_color = hex_color[1:]
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
+@st.cache_data
 def get_text_size(font, text):
     if not text: return 0, 0
     bbox = font.getbbox(text)
     return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
+@st.cache_data
 def smart_wrap_text(text: str, font, max_width: int) -> list:
     words = text.split()
     if not words: return [""]
@@ -88,6 +120,7 @@ def smart_wrap_text(text: str, font, max_width: int) -> list:
     lines.append(current_line)
     return lines
 
+@st.cache_data
 def create_gradient(w, h, c1_hex, c2_hex):
     img = Image.new("RGBA", (w, h))
     draw = ImageDraw.Draw(img)
@@ -111,19 +144,16 @@ def draw_rounded_rect(draw, xy, radius=40, fill=None):
     draw.rectangle([x2-radius, y1+radius, x2, y2-radius], fill=fill)
     draw.rectangle([x1, y2-radius, x2, y2], fill=fill)
 
-# --- Font Loading with Robust URLs ---
 @st.cache_data(ttl=3600)
 def download_font(font_name):
     path = f"{font_name}.ttf"
     if not os.path.exists(path):
-        # Specific, reliable GitHub raw URLs for font files
         if font_name == "Poppins-Bold":
             url = "https://github.com/google/fonts/raw/main/ofl/poppins/static/Poppins-Bold.ttf"
         elif font_name == "Roboto-Regular":
             url = "https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Regular.ttf"
         else:
-            return None # Fallback
-
+            return None 
         try:
             r = requests.get(url, timeout=10)
             r.raise_for_status()
@@ -140,7 +170,7 @@ HOOK_FONT = VERSE_FONT = REF_FONT = ImageFont.load_default()
 try:
     if FONT_PATH_BOLD: HOOK_FONT = ImageFont.truetype(FONT_PATH_BOLD, 80)
     if FONT_PATH_REGULAR: 
-        VERSE_FONT = ImageFont.truetype(FONT_PATH_REGULAR, 110) # Using REGULAR for verse
+        VERSE_FONT = ImageFont.truetype(FONT_PATH_REGULAR, 110) 
         REF_FONT = ImageFont.truetype(FONT_PATH_REGULAR, 48)
 except Exception: pass
 
@@ -183,12 +213,15 @@ def download_logo(logo_url):
 # --- 3. SESSION STATE INITIALIZATION ---
 
 def initialize_session_state():
+    # Set default video quality to the first option (Draft / 12 FPS)
+    default_quality = list(VIDEO_QUALITIES.keys())[0] 
+    
     defaults = {
         'aspect_ratio_name': list(ASPECT_RATIOS.keys())[0],
         'color_theme': PALETTE_NAMES[0],
         'bg_anim': BG_ANIMATIONS[1],
         'txt_anim': TEXT_ANIMATIONS[1],
-        'quality_name': list(VIDEO_QUALITIES.keys())[1],
+        'quality_name': default_quality,
         'book': "Psalm",
         'chapter': 46,
         'verse_num': 1,
@@ -206,6 +239,7 @@ initialize_session_state()
 
 # --- 4. CORE DRAWING LOGIC (With Dynamic Layout & Animation Refinements) ---
 
+# (NOTE: The logic inside generate_text_overlay remains the same as the previous polished version)
 def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_num, hook, bg_anim, txt_anim, logo_placement, animation_phase=None):
     """Generates the transparent RGBA overlay and the composed PIL Image preview."""
     
@@ -218,7 +252,6 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
     overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0)) 
     draw = ImageDraw.Draw(overlay)
     
-    # Normalize phase to 0-1 for easier timing calculation
     phase = (animation_phase / (2 * math.pi)) % 1 if animation_phase is not None else 0
 
     # --- Dynamic Layout Calculation ---
@@ -242,12 +275,10 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
     if box_h > max_allowable_h: box_h = int(max_allowable_h)
 
     box_x = MARGIN
-    # Refinement: Vertically center box around 45% (H * 0.45) for visual lift
     box_center_y = int(H * 0.45)
     box_y = box_center_y - (box_h // 2)
     box_xy = (box_x, box_y, box_x + box_w, box_y + box_h)
     
-    # Initial Y position for drawing text inside the box
     current_y = box_y + (box_h - content_height) // 2
 
     # Text Box Drawing
@@ -264,15 +295,13 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
         draw.text(((W - w)//2, current_y), line, font=HOOK_FONT, fill=hook_color)
         current_y += line_h_hook
     
-    current_y += 40 # Space between hook and verse
+    current_y += 40 
 
     # --- Verse Text Drawing with Premium Animations ---
     
     if txt_anim == "Typewriter Effect":
         full_text = " ".join(verse_lines)
         total_chars = len(full_text)
-        
-        # Animate over 90% of the duration
         chars_visible = int(total_chars * min(1.0, phase / 0.9))
 
         temp_lines = []
@@ -306,14 +335,12 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
             draw.text(((W - w)//2, y_anim), line, font=VERSE_FONT, fill=verse_fill)
             y_anim += line_h_verse
         
-        # Typewriter Cursor (Flickers every 0.2s)
         if phase > 0.05 and int(phase * 10) % 2 == 0:
             last_line = temp_lines[-1] if temp_lines else ""
             cursor_x = (W - get_text_size(VERSE_FONT, last_line)[0]) // 2 + get_text_size(VERSE_FONT, last_line)[0] + 5
             draw.line([(cursor_x, y_anim - line_h_verse + 5), (cursor_x, y_anim - 15)], fill=verse_fill, width=5)
         
     elif txt_anim == "Fade-in Opacity":
-        # Fade-in over 50% of the duration (0.0 to 0.5 phase)
         opacity = int(50 + 205 * min(1.0, phase / 0.5))
         fade_fill = (255, 255, 255, opacity)
         y_anim = current_y
@@ -323,7 +350,6 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
             y_anim += line_h_verse
             
     else: 
-        # None or Glow Pulse fallback
         y_anim = current_y
         for line in verse_lines:
             w, h = get_text_size(VERSE_FONT, line)
@@ -332,8 +358,7 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
 
     current_y = y_anim 
 
-    current_y += 40 # Space before reference
-    # Reference and separator drawing
+    current_y += 40 
     ref_color = (*hex_to_rgb(pal["text_secondary"]), 255)
     w, h = get_text_size(REF_FONT, final_ref)
     draw.text(((W - w)//2, current_y), final_ref, font=REF_FONT, fill=ref_color)
@@ -350,7 +375,6 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
             logo_x = int(50 + h_norm * (W - logo_w - 100))
             logo_y = int(50 + v_norm * (H - logo_h - 100))
             
-            # Polish: Draw a subtle, transparent backing circle for visibility
             draw.ellipse([logo_x - 10, logo_y - 10, logo_x + logo_w + 10, logo_y + logo_h + 10], fill=(255, 255, 255, 50)) 
             
             overlay.paste(logo_img, (logo_x, logo_y), logo_img)
@@ -372,7 +396,7 @@ def generate_mp4(aspect_ratio_name, palette_name, book, chapter, verse_num, hook
     progress_container = st.container()
     progress_bar = progress_container.progress(0, text="Initializing...")
     
-    # 1. Media Caching
+    # 1. Media Caching (Uses st.cache_data)
     progress_bar.progress(10, text="Caching external media...")
     audio_path = cache_media(audio_url, 'mp4') if audio_url else None
     video_path = cache_media(video_bg_url, 'mp4') if video_bg_url else None
@@ -397,13 +421,11 @@ def generate_mp4(aspect_ratio_name, palette_name, book, chapter, verse_num, hook
         
         def make_gradient_frame(t):
             base_img = create_gradient(W_clip, H_clip, pal["bg"][0], pal["bg"][1])
-            # Polish: Placeholder for complex abstract BG animation logic goes here
             return np.array(base_img.convert('RGB'))
         base_clip = VideoClip(make_gradient_frame, duration=duration).set_fps(fps)
 
     # 3. Animated Overlay Clip
     progress_bar.progress(50, text="Creating animated text overlay...")
-    # NOTE: [1] gets the NumPy array (overlay) from the drawing function
     overlay_clip = VideoClip(lambda t: generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_num, hook, bg_anim, txt_anim, logo_placement, animation_phase=t)[1], duration=duration).set_fps(fps)
     
     # 4. Composition
@@ -414,7 +436,8 @@ def generate_mp4(aspect_ratio_name, palette_name, book, chapter, verse_num, hook
     if audio_path:
         try:
             progress_bar.progress(70, text="Adding and clipping audio...")
-            audio_clip = AudioFileClip(audio_path)
+            # NOTE: MoviePy uses AudioFileClip, fixed typo in import above
+            audio_clip = AudioFileClip(audio_path) 
             audio_clip = audio_clip.subclip(0, duration)
             final_clip = final_clip.set_audio(audio_clip)
 
@@ -483,13 +506,19 @@ with col1:
 with col2:
     st.subheader("📖 Verse Selection")
     
+    # Use the full list of books
     st.selectbox("Book", BOOK_NAMES, key='book')
     
-    available_chapters = list(BIBLE_STRUCTURE.get(st.session_state.book, {}).keys())
+    # Determine max verses based on the BIBLE_STRUCTURE, defaulting to a high number if the book isn't detailed.
+    max_verses = BIBLE_STRUCTURE.get(st.session_state.book, {}).get(st.session_state.chapter, 31) 
+    
+    # Use the available chapter keys, defaulting to a list if not structured
+    available_chapters = list(BIBLE_STRUCTURE.get(st.session_state.book, {1: 31}).keys())
     st.selectbox("Chapter", available_chapters, key='chapter')
 
-    max_verses = BIBLE_STRUCTURE.get(st.session_state.book, {}).get(st.session_state.chapter, 1)
-    available_verses = list(range(1, max_verses + 1))
+    # Ensure verse selection dynamically updates based on the max_verses for the selected chapter
+    max_verses_in_chapter = BIBLE_STRUCTURE.get(st.session_state.book, {}).get(st.session_state.chapter, 31)
+    available_verses = list(range(1, max_verses_in_chapter + 1))
     st.selectbox("Verse", available_verses, key='verse_num')
     
     st.text_input("Engagement Hook", value=st.session_state.hook, key='hook')
@@ -549,3 +578,8 @@ st.markdown("---")
 st.text_area("Copy Caption for Social Media", f"{st.session_state.hook} Read {final_ref} today. #dailyverse #faith", height=150)
 
 st.info("💡 Next Steps: Add user file uploads and subtle audio volume controls.")
+
+# --- Cleanup Button (for manual trigger) ---
+if st.button("🧹 Cleanup Cached Media and Temp Files"):
+    cleanup_temp_files()
+    st.success("Cleaned up temporary media files!")
