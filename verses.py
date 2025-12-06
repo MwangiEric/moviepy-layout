@@ -3,12 +3,11 @@ from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 import io, os, requests, random, math, time, textwrap
 from moviepy.editor import VideoClip 
 import numpy as np
+import pythonbible # NEW: Library for local verse fetching
 
 # --- CONFIGURATION & CONSTANTS ---
 st.set_page_config(page_title="✝️ Verse Studio Premium", page_icon="✝️", layout="wide")
 
-# ASPECT RATIO CONTROL DYNAMIC VARIABLES
-# W and H will be set based on the user's selection in the UI
 W, H = 1080, 1920 
 MARGIN = 100
 DEFAULT_VERSE_TEXT = "God is our refuge and strength, an ever-present help in trouble." 
@@ -42,11 +41,18 @@ PALETTES = {
 }
 PALETTE_NAMES = list(PALETTES.keys())
 
-TEMPLATES = ["Modern Box Layout"] # Simplified template since we now use granular controls
+TEMPLATES = ["Modern Box Layout"] 
 TEXT_ANIMATIONS = ["None", "Glow Pulse"]
-BG_ANIMATIONS = ["None", "Cross Orbit", "Wave Flow"] 
+# Updated BG Animations
+BG_ANIMATIONS = ["None", "Cross Orbit (Geometric)", "Wave Flow (Abstract)", "Floating Circles (Abstract)"] 
 
 # BIBLE DATA (Simplified for Selection)
+# We need to map our names to pythonbible's format for fetching
+BOOK_NAMES_MAP = {
+    "Psalm": pythonbible.Book.PSALM, 
+    "John": pythonbible.Book.JOHN,
+    "Romans": pythonbible.Book.ROMANS
+}
 BIBLE_STRUCTURE = {
     "Psalm": {1: 6, 46: 11, 121: 8}, 
     "John": {3: 36, 14: 31},
@@ -58,6 +64,7 @@ BOOK_NAMES = list(BIBLE_STRUCTURE.keys())
 
 @st.cache_data(ttl=3600)
 def download_font():
+    # ... (Font download logic remains the same) ...
     path = "Poppins-Bold.ttf"
     if not os.path.exists(path):
         url = "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Bold.ttf"
@@ -82,25 +89,29 @@ def load_fonts():
 HOOK_FONT, VERSE_FONT, REF_FONT = load_fonts()
 
 @st.cache_data(ttl=1800)
-def fetch_verse(ref: str) -> str:
-    cleaned_ref = ref.replace(' ', '')
+def fetch_verse(book_name: str, chapter: int, verse_num: int) -> str:
+    """
+    NEW: Uses pythonbible for reliable local verse lookup.
+    """
     try:
-        url = f"https://bible-api.com/{cleaned_ref}"
-        r = requests.get(url, timeout=5)
-        r.raise_for_status()
-        data = r.json()
+        book_enum = BOOK_NAMES_MAP[book_name]
         
-        if 'error' in data or not data.get('verses'):
-            return DEFAULT_VERSE_TEXT
-            
-        verse_text = data.get("text")
+        # pythonbible requires a list of verses
+        verse_id = pythonbible.convert_reference_to_verse_ids(
+            [pythonbible.ScripRef(book=book_enum, chapter=chapter, verse=verse_num)]
+        )
+        
+        # Fetch the text for the verse ID (using King James Version, the default for pythonbible)
+        verse_text = pythonbible.get_verse_text(verse_id[0])
         
         if verse_text:
+            # We also append the Book/Chapter/Verse to the reference string later in the main function
             return verse_text.strip()
         else:
             return DEFAULT_VERSE_TEXT
         
-    except Exception:
+    except Exception as e:
+        # Fallback if any error occurs (e.g., Book/Chapter/Verse combo is invalid)
         return DEFAULT_VERSE_TEXT
 
 # --- DRAWING HELPERS ---
@@ -123,34 +134,66 @@ def create_gradient(w, h, c1_hex, c2_hex):
         draw.line([(x, 0), (x, h)], fill=(r, g, b))
     return img.convert("RGBA")
 
-# (wrap_text and draw_cross functions remain the same)
+def draw_cross(draw, cx, cy, size=100, phase=0):
+    pulse = 1 + 0.1 * math.sin(phase)
+    lw = int(15 * pulse)
+    fill_color = (255, 255, 255, 180) 
+    draw.line([(cx, cy - size//2), (cx, cy + size//2)], fill=fill_color, width=lw)
+    draw.line([(cx - size//2, cy), (cx + size//2, cy)], fill=fill_color, width=lw)
+
+def draw_waving_gradient(draw, pal, phase, w, h):
+    """Draws a subtle animated 'Wave Flow' abstract background."""
+    # Use a transparent accent color for a subtle wave effect
+    accent_rgb = hex_to_rgb(pal["accent"])
+    wave_color = accent_rgb + (40,) # Low opacity accent
+    
+    num_waves = 8
+    amplitude = h / 20
+    
+    for y in range(h):
+        # Calculate X offset based on sine wave, shifted by Y and time (phase)
+        offset = amplitude * math.sin(y * num_waves * math.pi / h + phase)
+        
+        # Draw a horizontal line using the accent color, slightly shifted
+        draw.line([(0 + offset, y), (w, y)], fill=wave_color, width=1)
+
+def draw_floating_circles(draw, pal, phase, w, h):
+    """Draws multiple animated 'Floating Circles' abstract background."""
+    accent_rgb = hex_to_rgb(pal["accent"])
+    circle_color = accent_rgb + (60,) # Low opacity accent
+    
+    num_circles = 8
+    
+    for i in range(num_circles):
+        # Use i and phase to create unique and continuous movement
+        size = 50 + (i * 10)
+        
+        # Circular motion based on time (phase) and index (i)
+        angle = phase + (i * 0.5)
+        
+        # Center of motion for this circle
+        cx_base = w * (i % 3 + 1) / 4
+        cy_base = h * (i % 2 + 1) / 3
+
+        # Current position (offset from base position)
+        cx = int(cx_base + w/8 * math.cos(angle))
+        cy = int(cy_base + h/8 * math.sin(angle))
+        
+        # Draw the circle (ellipse bounding box)
+        draw.ellipse([cx - size, cy - size, cx + size, cy + size], outline=circle_color, width=3)
+
 
 def draw_rotating_rectangle(base, draw, box_xy, angle, color_hex):
     """Draws a subtle rotating rectangle 30px outside the main text box."""
-    # Rotate function for Pillow is complex, so we'll approximate the effect with a standard, 
-    # slightly scaled rectangle for static images and let the video animation handle the rotation effect.
-    
-    # Coordinates of the main box: (x1, y1, x2, y2)
     x1, y1, x2, y2 = box_xy
-    
-    # Calculate the padded rectangle coordinates
     pad = 30
     rect_x1, rect_y1 = x1 - pad, y1 - pad
     rect_x2, rect_y2 = x2 + pad, y2 + pad
-    
-    # Center of the rotating element
-    center_x = (rect_x1 + rect_x2) / 2
-    center_y = (rect_y1 + rect_y2) / 2
-    
-    # Since Pillow's ImageDraw doesn't have native rotation for primitives, 
-    # we'll draw a slightly scaled and rotated copy of the main box onto the canvas
-    # The simplest "rotation" for demonstration is a small X/Y shift based on phase.
     
     # Calculate offset based on phase (t)
     offset_x = 5 * math.cos(angle)
     offset_y = 5 * math.sin(angle)
     
-    # Draw the rotated rectangle (using simple offset for static image preview)
     draw.rectangle([
         rect_x1 + offset_x, rect_y1 + offset_y, 
         rect_x2 + offset_x, rect_y2 + offset_y
@@ -159,36 +202,38 @@ def draw_rotating_rectangle(base, draw, box_xy, angle, color_hex):
 
 # --- CORE DRAWING FUNCTION ---
 
-def generate_poster(aspect_ratio_name, palette_name, ref, hook, bg_anim, txt_anim, animation_phase=None):
+def generate_poster(aspect_ratio_name, palette_name, book, chapter, verse_num, hook, bg_anim, txt_anim, animation_phase=None):
     """Generates a single poster frame applying the selected animation styles."""
     
     # Set dynamic W and H based on selection
     global W, H
     W, H = ASPECT_RATIOS[aspect_ratio_name]
+    final_ref = f"{book} {chapter}:{verse_num}"
     
-    verse_text = fetch_verse(ref)
+    # NEW: Fetch verse using native pythonbible function
+    verse_text = fetch_verse(book, chapter, verse_num)
+    
     pal = PALETTES[palette_name]
-    
     base = create_gradient(W, H, pal["bg"][0], pal["bg"][1])
     draw = ImageDraw.Draw(base)
 
-    # Calculate Text Box coordinates (dependent on W, H)
+    # Calculate Coordinates
     box_w, box_h = W - 2 * MARGIN, int(H * 0.6)
     box_x, box_y = MARGIN, (H - box_h) // 2
     box_xy = (box_x, box_y, box_x + box_w, box_y + box_h)
-    
     phase = animation_phase if animation_phase is not None else time.time() % (2 * math.pi)
 
-    # 1. Subtle Rotating Rectangle Animation
+    # 1. Subtle Rotating Rectangle (Always On)
     draw_rotating_rectangle(base, draw, box_xy, phase * 0.2, pal["accent"])
     
     # 2. Background Animation Layer
-    if bg_anim == "Cross Orbit":
+    if bg_anim == "Cross Orbit (Geometric)":
         draw_cross(draw, W//4, H//3, 120, phase * 1.5)
         draw_cross(draw, (3 * W)//4, (2 * H)//3, 90, phase * 1.5 + math.pi)
-    elif bg_anim == "Wave Flow":
-        # Placeholder for Wave Flow implementation
-        pass
+    elif bg_anim == "Wave Flow (Abstract)":
+        draw_waving_gradient(draw, pal, phase, W, H)
+    elif bg_anim == "Floating Circles (Abstract)":
+        draw_floating_circles(draw, pal, phase, W, H)
 
     # 3. Text Box and Static Text Layout
     box_color = (0, 0, 0, 180) if "Dark" in palette_name else (255, 255, 255, 200)
@@ -196,11 +241,10 @@ def generate_poster(aspect_ratio_name, palette_name, ref, hook, bg_anim, txt_ani
 
     # Layout calculation (remains static)
     max_text_width = box_w - 100
-    hook_lines = textwrap.wrap(hook, width=30) # Using textwrap for simplicity here
+    hook_lines = textwrap.wrap(hook, width=30) 
     verse_lines = textwrap.wrap(f"“{verse_text}”", width=25) 
-    ref_lines = textwrap.wrap(ref, width=30)
+    ref_lines = textwrap.wrap(final_ref, width=30) # Use the constructed reference
 
-    # Since we use textwrap now, let's recalculate based on approximate line height
     line_h_hook = HOOK_FONT.getbbox("A")[3] + 10 
     line_h_verse = VERSE_FONT.getbbox("A")[3] + 8 
     line_h_ref = REF_FONT.getbbox("A")[3] + 6   
@@ -210,7 +254,6 @@ def generate_poster(aspect_ratio_name, palette_name, ref, hook, bg_anim, txt_ani
 
     hook_rgb = hex_to_rgb(pal["accent"])
     hook_color = (*hook_rgb, 255)
-    
     verse_fill = (255, 255, 255, 255) 
     glow_fill = (100, 149, 237, 150)
     
@@ -247,16 +290,16 @@ def generate_poster(aspect_ratio_name, palette_name, ref, hook, bg_anim, txt_ani
         draw.text(((W-w)//2, current_y), line, font=REF_FONT, fill=hook_color)
         current_y += line_h_ref
 
-    return np.array(base.convert('RGB')) if animation_phase is not None else base, verse_text
+    return np.array(base.convert('RGB')) if animation_phase is not None else base, verse_text, final_ref
 
 # --- VIDEO GENERATOR (MoviePy) ---
 
-def generate_mp4(aspect_ratio_name, palette_name, ref, hook, bg_anim, txt_anim, quality_name):
+def generate_mp4(aspect_ratio_name, palette_name, book, chapter, verse_num, hook, bg_anim, txt_anim, quality_name):
     
     duration, fps = VIDEO_QUALITIES[quality_name]
     
     def make_frame(t):
-        return generate_poster(aspect_ratio_name, palette_name, ref, hook, bg_anim, txt_anim, animation_phase=t)[0]
+        return generate_poster(aspect_ratio_name, palette_name, book, chapter, verse_num, hook, bg_anim, txt_anim, animation_phase=t)[0]
 
     clip = VideoClip(make_frame, duration=duration)
     temp_filename = f"temp_video_{time.time()}.mp4"
@@ -316,17 +359,13 @@ with col2:
     default_verse_index = available_verses.index(1) if 1 in available_verses else 0
     verse_num = st.selectbox("Verse", available_verses, index=default_verse_index)
     
-    final_ref = f"{book} {chapter}:{verse_num}"
-    st.markdown(f"**Selected Verse:** `{final_ref}`")
-
-    st.markdown("---")
     hook = st.text_input("Engagement Hook", "Need strength today?")
 
 st.markdown("---")
 
 # --- Poster Generation and Display ---
 
-poster_img, verse_text = generate_poster(aspect_ratio_name, color_theme, final_ref, hook, bg_anim, txt_anim)
+poster_img, verse_text, final_ref = generate_poster(aspect_ratio_name, color_theme, book, chapter, verse_num, hook, bg_anim, txt_anim)
 st.image(poster_img, caption=f"{color_theme} | {aspect_ratio_name} | Ref: {final_ref}", use_column_width=True)
 
 st.write(f"**Fetched Verse:** {verse_text}")
@@ -335,7 +374,7 @@ st.markdown("---")
 # 1. Static PNG Download
 buf = io.BytesIO()
 poster_img.save(buf, format="PNG")
-st.download_button("⬇️ Download Static Poster PNG", data=buf.getvalue(), file_name=f"verse_{final_ref.replace(' ', '_')}.png", mime="image/png")
+st.download_button("⬇️ Download Static Poster PNG", data=buf.getvalue(), file_name=f"verse_{final_ref.replace(' ', '_').replace(':', '')}.png", mime="image/png")
 
 # 2. Animated Video Feature (MP4)
 st.subheader("🎬 Animated Video")
@@ -344,13 +383,13 @@ st.subheader("🎬 Animated Video")
 if st.button(f"✨ Generate {quality_name} Video"):
     with st.spinner(f"Rendering 6-second MP4 video..."):
         try:
-            mp4_bytes = generate_mp4(aspect_ratio_name, color_theme, final_ref, hook, bg_anim, txt_anim, quality_name)
+            mp4_bytes = generate_mp4(aspect_ratio_name, color_theme, book, chapter, verse_num, hook, bg_anim, txt_anim, quality_name)
             st.video(mp4_bytes, format="video/mp4")
-            st.download_button("⬇️ Download Animated MP4", data=mp4_bytes, file_name=f"verse_animated_{final_ref.replace(' ', '_')}.mp4", mime="video/mp4")
+            st.download_button("⬇️ Download Animated MP4", data=mp4_bytes, file_name=f"verse_animated_{final_ref.replace(' ', '_').replace(':', '')}.mp4", mime="video/mp4")
         except Exception as e:
             st.error(f"Video generation failed. Error: {e}")
 
 st.markdown("---")
-st.text_area("Copy Caption for Social Media", "Reflections", height=150)
+st.text_area("Copy Caption for Social Media", f"{hook} Read {final_ref} today. #dailyverse #faith", height=150)
 
 st.info("📓 Dynamic hook and journaling features are next!")
