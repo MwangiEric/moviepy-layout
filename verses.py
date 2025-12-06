@@ -70,26 +70,78 @@ def hex_to_rgb(hex_color):
     if hex_color.startswith('#'): hex_color = hex_color[1:]
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
+def get_text_size(font, text):
+    if not text: return 0, 0
+    bbox = font.getbbox(text)
+    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+def smart_wrap_text(text: str, font, max_width: int) -> list:
+    words = text.split()
+    if not words: return [""]
+    lines, current_line = [], words[0]
+    for word in words[1:]:
+        if get_text_size(font, current_line + " " + word)[0] <= max_width:
+            current_line += " " + word
+        else:
+            lines.append(current_line)
+            current_line = word
+    lines.append(current_line)
+    return lines
+
+def create_gradient(w, h, c1_hex, c2_hex):
+    img = Image.new("RGBA", (w, h))
+    draw = ImageDraw.Draw(img)
+    c1_rgb, c2_rgb = hex_to_rgb(c1_hex), hex_to_rgb(c2_hex)
+    for x in range(w):
+        ratio = x / w
+        rgb = tuple(int((1-ratio)*c1_rgb[i] + ratio*c2_rgb[i]) for i in range(3))
+        draw.line([(x, 0), (x, h)], fill=(*rgb, 255))
+    return img
+
+def draw_rounded_rect(draw, xy, radius=40, fill=None):
+    """Draws a rounded rectangle using PIL shapes."""
+    x1, y1, x2, y2 = [int(v) for v in xy]
+    radius = min(radius, (x2 - x1) // 2, (y2 - y1) // 2)
+    draw.pieslice([x1, y1, x1+2*radius, y1+2*radius], 180, 270, fill=fill)
+    draw.pieslice([x2-2*radius, y1, x2, y1+2*radius], 270, 360, fill=fill)
+    draw.pieslice([x2-2*radius, y2-2*radius, x2, y2], 0, 90, fill=fill)
+    draw.pieslice([x1, y2-2*radius, x1+2*radius, y2], 90, 180, fill=fill)
+    draw.rectangle([x1+radius, y1, x2-radius, y2], fill=fill)
+    draw.rectangle([x1, y1+radius, x1+radius, y2-radius], fill=fill)
+    draw.rectangle([x2-radius, y1+radius, x2, y2-radius], fill=fill)
+    draw.rectangle([x1, y2-radius, x2, y2], fill=fill)
+
+# --- Font Loading with Robust URLs ---
 @st.cache_data(ttl=3600)
-def download_font(font_name="Poppins-Bold"):
+def download_font(font_name):
     path = f"{font_name}.ttf"
     if not os.path.exists(path):
-        # Using a reliable fallback URL structure for Google Fonts
-        url = f"https://github.com/google/fonts/raw/main/ofl/{font_name.lower().replace('-', '')}/{font_name}.ttf"
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        with open(path, "wb") as f: f.write(r.content)
+        # Specific, reliable GitHub raw URLs for font files
+        if font_name == "Poppins-Bold":
+            url = "https://github.com/google/fonts/raw/main/ofl/poppins/static/Poppins-Bold.ttf"
+        elif font_name == "Roboto-Regular":
+            url = "https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Regular.ttf"
+        else:
+            return None # Fallback
+
+        try:
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            with open(path, "wb") as f: f.write(r.content)
+        except Exception as e:
+            st.error(f"Failed to download font '{font_name}'. Error: {e}")
+            return None
     return path
 
-# --- Font Loading ---
 FONT_PATH_BOLD = download_font("Poppins-Bold")
-FONT_PATH_REGULAR = download_font("Roboto-Regular") # New, softer font for verse
+FONT_PATH_REGULAR = download_font("Roboto-Regular")
 
 HOOK_FONT = VERSE_FONT = REF_FONT = ImageFont.load_default() 
 try:
-    HOOK_FONT = ImageFont.truetype(FONT_PATH_BOLD, 80)
-    VERSE_FONT = ImageFont.truetype(FONT_PATH_REGULAR, 110) # Using REGULAR for verse
-    REF_FONT = ImageFont.truetype(FONT_PATH_REGULAR, 48)
+    if FONT_PATH_BOLD: HOOK_FONT = ImageFont.truetype(FONT_PATH_BOLD, 80)
+    if FONT_PATH_REGULAR: 
+        VERSE_FONT = ImageFont.truetype(FONT_PATH_REGULAR, 110) # Using REGULAR for verse
+        REF_FONT = ImageFont.truetype(FONT_PATH_REGULAR, 48)
 except Exception: pass
 
 @st.cache_data(ttl=1800)
@@ -126,21 +178,6 @@ def download_logo(logo_url):
         response.raise_for_status()
         return Image.open(io.BytesIO(response.content)).convert("RGBA")
     except Exception: return None
-
-# ... (Geometry and text helpers get_text_size, smart_wrap_text, create_gradient remain) ...
-
-def draw_rounded_rect(draw, xy, radius=40, fill=None):
-    """Draws a rounded rectangle using PIL shapes."""
-    x1, y1, x2, y2 = [int(v) for v in xy]
-    radius = min(radius, (x2 - x1) // 2, (y2 - y1) // 2)
-    draw.pieslice([x1, y1, x1+2*radius, y1+2*radius], 180, 270, fill=fill)
-    draw.pieslice([x2-2*radius, y1, x2, y1+2*radius], 270, 360, fill=fill)
-    draw.pieslice([x2-2*radius, y2-2*radius, x2, y2], 0, 90, fill=fill)
-    draw.pieslice([x1, y2-2*radius, x1+2*radius, y2], 90, 180, fill=fill)
-    draw.rectangle([x1+radius, y1, x2-radius, y2], fill=fill)
-    draw.rectangle([x1, y1+radius, x1+radius, y2-radius], fill=fill)
-    draw.rectangle([x2-radius, y1+radius, x2, y2-radius], fill=fill)
-    draw.rectangle([x1, y2-radius, x2, y2], fill=fill)
 
 
 # --- 3. SESSION STATE INITIALIZATION ---
@@ -195,7 +232,6 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
     line_h_verse = VERSE_FONT.getbbox("A")[3] + 8 
     line_h_ref = REF_FONT.getbbox("A")[3] + 6   
     
-    # Calculate required content height
     content_height = (len(hook_lines) * line_h_hook) + (len(verse_lines) * line_h_verse) + (len(ref_lines) * line_h_ref) + 120
     
     padding = 50
@@ -206,7 +242,7 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
     if box_h > max_allowable_h: box_h = int(max_allowable_h)
 
     box_x = MARGIN
-    # Refinement: Vertically center box around 45% (H * 0.45) rather than 50% for visual lift
+    # Refinement: Vertically center box around 45% (H * 0.45) for visual lift
     box_center_y = int(H * 0.45)
     box_y = box_center_y - (box_h // 2)
     box_xy = (box_x, box_y, box_x + box_w, box_y + box_h)
@@ -236,7 +272,7 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
         full_text = " ".join(verse_lines)
         total_chars = len(full_text)
         
-        # Animate over 90% of the duration, then hold
+        # Animate over 90% of the duration
         chars_visible = int(total_chars * min(1.0, phase / 0.9))
 
         temp_lines = []
@@ -244,12 +280,10 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
         current_line_anim = ""
         char_count = 0
         
-        # Logic to simulate line wrapping while typing (simplified)
         for word in words:
             test_line = (current_line_anim + " " + word).strip()
             
             if char_count + len(word) > chars_visible and char_count < chars_visible:
-                # Type partial word
                 remaining_chars = chars_visible - char_count
                 if remaining_chars > 0:
                     current_line_anim = test_line[:remaining_chars].strip()
@@ -274,12 +308,12 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
         
         # Typewriter Cursor (Flickers every 0.2s)
         if phase > 0.05 and int(phase * 10) % 2 == 0:
-            last_char = temp_lines[-1] if temp_lines else ""
-            cursor_x = (W - get_text_size(VERSE_FONT, last_char)[0]) // 2 + get_text_size(VERSE_FONT, last_char)[0] + 5
+            last_line = temp_lines[-1] if temp_lines else ""
+            cursor_x = (W - get_text_size(VERSE_FONT, last_line)[0]) // 2 + get_text_size(VERSE_FONT, last_line)[0] + 5
             draw.line([(cursor_x, y_anim - line_h_verse + 5), (cursor_x, y_anim - 15)], fill=verse_fill, width=5)
         
     elif txt_anim == "Fade-in Opacity":
-        # Fade-in over 50% of the duration (0.0 to 0.5 phase), then hold 255
+        # Fade-in over 50% of the duration (0.0 to 0.5 phase)
         opacity = int(50 + 205 * min(1.0, phase / 0.5))
         fade_fill = (255, 255, 255, opacity)
         y_anim = current_y
@@ -296,7 +330,7 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
             draw.text(((W - w)//2, y_anim), line, font=VERSE_FONT, fill=verse_fill)
             y_anim += line_h_verse
 
-    current_y = y_anim # Update Y position
+    current_y = y_anim 
 
     current_y += 40 # Space before reference
     # Reference and separator drawing
@@ -328,7 +362,7 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
     return preview_bg, np.array(overlay), verse_text_raw, final_ref
 
 
-# --- 5. VIDEO GENERATION LOGIC (Refined Error Handling and Audio) ---
+# --- 5. VIDEO GENERATION LOGIC ---
 
 def generate_mp4(aspect_ratio_name, palette_name, book, chapter, verse_num, hook, bg_anim, txt_anim, quality_name, audio_url, video_bg_url, logo_placement):
     
@@ -338,7 +372,7 @@ def generate_mp4(aspect_ratio_name, palette_name, book, chapter, verse_num, hook
     progress_container = st.container()
     progress_bar = progress_container.progress(0, text="Initializing...")
     
-    # 1. Media Caching (Handles None checks internally)
+    # 1. Media Caching
     progress_bar.progress(10, text="Caching external media...")
     audio_path = cache_media(audio_url, 'mp4') if audio_url else None
     video_path = cache_media(video_bg_url, 'mp4') if video_bg_url else None
@@ -350,7 +384,6 @@ def generate_mp4(aspect_ratio_name, palette_name, book, chapter, verse_num, hook
         try:
             progress_bar.progress(30, text="Composing video background...")
             base_clip = VideoFileClip(video_path)
-            # Ensure clip matches required dimensions and duration
             base_clip = base_clip.fx(vfx.resize, newsize=(W_clip, H_clip)).subclip(0, duration)
             if base_clip.duration < duration:
                  base_clip = base_clip.loop(duration=duration)
@@ -364,29 +397,25 @@ def generate_mp4(aspect_ratio_name, palette_name, book, chapter, verse_num, hook
         
         def make_gradient_frame(t):
             base_img = create_gradient(W_clip, H_clip, pal["bg"][0], pal["bg"][1])
-            # Polish: Placeholder for complex abstract BG animation (e.g., Perlin Noise distortion)
-            # if bg_anim == "Wave Flow (Abstract)":
-            #     # Add complex distortion based on time (t)
-            #     pass 
+            # Polish: Placeholder for complex abstract BG animation logic goes here
             return np.array(base_img.convert('RGB'))
         base_clip = VideoClip(make_gradient_frame, duration=duration).set_fps(fps)
 
     # 3. Animated Overlay Clip
     progress_bar.progress(50, text="Creating animated text overlay...")
+    # NOTE: [1] gets the NumPy array (overlay) from the drawing function
     overlay_clip = VideoClip(lambda t: generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_num, hook, bg_anim, txt_anim, logo_placement, animation_phase=t)[1], duration=duration).set_fps(fps)
     
     # 4. Composition
     final_clip = CompositeVideoClip([base_clip, overlay_clip])
     final_clip = final_clip.set_duration(duration).set_fps(fps)
 
-    # 5. Audio Integration (with clipping and volume control placeholder)
+    # 5. Audio Integration 
     if audio_path:
         try:
             progress_bar.progress(70, text="Adding and clipping audio...")
             audio_clip = AudioFileClip(audio_path)
             audio_clip = audio_clip.subclip(0, duration)
-            # Polish: Placeholder for audio fade-in/out
-            # audio_clip = audio_clip.fx(afx.audio_fadein, 0.5).fx(afx.audio_fadeout, 0.5)
             final_clip = final_clip.set_audio(audio_clip)
 
         except Exception as e:
@@ -519,4 +548,4 @@ if st.button(f"✨ Generate {st.session_state.quality_name} Video"):
 st.markdown("---")
 st.text_area("Copy Caption for Social Media", f"{st.session_state.hook} Read {final_ref} today. #dailyverse #faith", height=150)
 
-st.info("📓 Final polish: Add user uploads for media and subtle audio controls next!")
+st.info("💡 Next Steps: Add user file uploads and subtle audio volume controls.")
