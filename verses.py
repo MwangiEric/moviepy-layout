@@ -3,7 +3,7 @@ from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 import io, os, requests, random, math, time, textwrap
 from moviepy.editor import VideoClip 
 import numpy as np
-import pythonbible # NEW: Library for local verse fetching
+import pythonbible # Library for local verse fetching
 
 # --- CONFIGURATION & CONSTANTS ---
 st.set_page_config(page_title="✝️ Verse Studio Premium", page_icon="✝️", layout="wide")
@@ -43,11 +43,9 @@ PALETTE_NAMES = list(PALETTES.keys())
 
 TEMPLATES = ["Modern Box Layout"] 
 TEXT_ANIMATIONS = ["None", "Glow Pulse"]
-# Updated BG Animations
 BG_ANIMATIONS = ["None", "Cross Orbit (Geometric)", "Wave Flow (Abstract)", "Floating Circles (Abstract)"] 
 
 # BIBLE DATA (Simplified for Selection)
-# We need to map our names to pythonbible's format for fetching
 BOOK_NAMES_MAP = {
     "Psalm": pythonbible.Book.PSALM, 
     "John": pythonbible.Book.JOHN,
@@ -64,7 +62,6 @@ BOOK_NAMES = list(BIBLE_STRUCTURE.keys())
 
 @st.cache_data(ttl=3600)
 def download_font():
-    # ... (Font download logic remains the same) ...
     path = "Poppins-Bold.ttf"
     if not os.path.exists(path):
         url = "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Bold.ttf"
@@ -91,26 +88,21 @@ HOOK_FONT, VERSE_FONT, REF_FONT = load_fonts()
 @st.cache_data(ttl=1800)
 def fetch_verse(book_name: str, chapter: int, verse_num: int) -> str:
     """
-    NEW: Uses pythonbible for reliable local verse lookup.
+    Uses pythonbible with optimized verse_id format.
     """
     try:
         book_enum = BOOK_NAMES_MAP[book_name]
         
-        # pythonbible requires a list of verses
+        # Use the combined integer format for efficiency
         verse_id = int(f"{book_enum.value}{chapter:03d}{verse_num:03d}")
-verse_text = pythonbible.get_verse_text(verse_id)
         
-        # Fetch the text for the verse ID (using King James Version, the default for pythonbible)
-        verse_text = pythonbible.get_verse_text(verse_id[0])
+        # Fetch the text for the verse ID (KJV translation by default)
+        verse_text = pythonbible.get_verse_text(verse_id)
         
-        if verse_text:
-            # We also append the Book/Chapter/Verse to the reference string later in the main function
-            return verse_text.strip()
-        else:
-            return DEFAULT_VERSE_TEXT
+        return verse_text.strip() if verse_text else DEFAULT_VERSE_TEXT
         
-    except Exception as e:
-        # Fallback if any error occurs (e.g., Book/Chapter/Verse combo is invalid)
+    except Exception:
+        # Fallback if any error occurs
         return DEFAULT_VERSE_TEXT
 
 # --- DRAWING HELPERS ---
@@ -141,55 +133,33 @@ def draw_cross(draw, cx, cy, size=100, phase=0):
     draw.line([(cx - size//2, cy), (cx + size//2, cy)], fill=fill_color, width=lw)
 
 def draw_waving_gradient(draw, pal, phase, w, h):
-    """Draws a subtle animated 'Wave Flow' abstract background."""
-    # Use a transparent accent color for a subtle wave effect
     accent_rgb = hex_to_rgb(pal["accent"])
-    wave_color = accent_rgb + (40,) # Low opacity accent
-    
+    wave_color = accent_rgb + (40,) 
     num_waves = 8
     amplitude = h / 20
-    
     for y in range(h):
-        # Calculate X offset based on sine wave, shifted by Y and time (phase)
         offset = amplitude * math.sin(y * num_waves * math.pi / h + phase)
-        
-        # Draw a horizontal line using the accent color, slightly shifted
         draw.line([(0 + offset, y), (w, y)], fill=wave_color, width=1)
 
 def draw_floating_circles(draw, pal, phase, w, h):
-    """Draws multiple animated 'Floating Circles' abstract background."""
     accent_rgb = hex_to_rgb(pal["accent"])
-    circle_color = accent_rgb + (60,) # Low opacity accent
-    
+    circle_color = accent_rgb + (60,) 
     num_circles = 8
-    
     for i in range(num_circles):
-        # Use i and phase to create unique and continuous movement
         size = 50 + (i * 10)
-        
-        # Circular motion based on time (phase) and index (i)
         angle = phase + (i * 0.5)
-        
-        # Center of motion for this circle
         cx_base = w * (i % 3 + 1) / 4
         cy_base = h * (i % 2 + 1) / 3
-
-        # Current position (offset from base position)
         cx = int(cx_base + w/8 * math.cos(angle))
         cy = int(cy_base + h/8 * math.sin(angle))
-        
-        # Draw the circle (ellipse bounding box)
         draw.ellipse([cx - size, cy - size, cx + size, cy + size], outline=circle_color, width=3)
 
-
 def draw_rotating_rectangle(base, draw, box_xy, angle, color_hex):
-    """Draws a subtle rotating rectangle 30px outside the main text box."""
     x1, y1, x2, y2 = box_xy
     pad = 30
     rect_x1, rect_y1 = x1 - pad, y1 - pad
     rect_x2, rect_y2 = x2 + pad, y2 + pad
     
-    # Calculate offset based on phase (t)
     offset_x = 5 * math.cos(angle)
     offset_y = 5 * math.sin(angle)
     
@@ -204,12 +174,11 @@ def draw_rotating_rectangle(base, draw, box_xy, angle, color_hex):
 def generate_poster(aspect_ratio_name, palette_name, book, chapter, verse_num, hook, bg_anim, txt_anim, animation_phase=None):
     """Generates a single poster frame applying the selected animation styles."""
     
-    # Set dynamic W and H based on selection
     global W, H
     W, H = ASPECT_RATIOS[aspect_ratio_name]
     final_ref = f"{book} {chapter}:{verse_num}"
     
-    # NEW: Fetch verse using native pythonbible function
+    # FETCH VERSE: Now using the optimized pythonbible function
     verse_text = fetch_verse(book, chapter, verse_num)
     
     pal = PALETTES[palette_name]
@@ -235,6 +204,7 @@ def generate_poster(aspect_ratio_name, palette_name, book, chapter, verse_num, h
         draw_floating_circles(draw, pal, phase, W, H)
 
     # 3. Text Box and Static Text Layout
+    # Pillow's rounded_rectangle is used here, confirming its presence
     box_color = (0, 0, 0, 180) if "Dark" in palette_name else (255, 255, 255, 200)
     draw.rounded_rectangle(box_xy, radius=40, fill=box_color)
 
@@ -242,7 +212,7 @@ def generate_poster(aspect_ratio_name, palette_name, book, chapter, verse_num, h
     max_text_width = box_w - 100
     hook_lines = textwrap.wrap(hook, width=30) 
     verse_lines = textwrap.wrap(f"“{verse_text}”", width=25) 
-    ref_lines = textwrap.wrap(final_ref, width=30) # Use the constructed reference
+    ref_lines = textwrap.wrap(final_ref, width=30) 
 
     line_h_hook = HOOK_FONT.getbbox("A")[3] + 10 
     line_h_verse = VERSE_FONT.getbbox("A")[3] + 8 
@@ -303,19 +273,34 @@ def generate_mp4(aspect_ratio_name, palette_name, book, chapter, verse_num, hook
     clip = VideoClip(make_frame, duration=duration)
     temp_filename = f"temp_video_{time.time()}.mp4"
     
+    # Streamlit progress bar implementation
+    progress_bar = st.progress(0, text="Starting video render...")
+
+    def progress_callback(T):
+        """Called by MoviePy periodically with the current time T."""
+        if T is not None and T > 0:
+            percent = min(100, int((T / duration) * 100))
+            progress_bar.progress(percent, text=f"Rendering frame: {T:.1f}s / {duration}s")
+        elif T is None:
+            # Final update when done
+            progress_bar.progress(100, text="Render complete! Reading file...")
+
     clip.write_videofile(
         temp_filename, 
         fps=fps, 
         codec='libx264', 
         audio=False,     
         verbose=False, 
-        logger=None
+        logger=None,
+        # Pass the callback function to MoviePy
+        progress_callback=progress_callback
     )
     
     with open(temp_filename, "rb") as f:
         video_bytes = f.read()
         
     os.remove(temp_filename)
+    progress_bar.empty() # Clear the progress bar after completion
     return video_bytes
 
 # --- STREAMLIT UI ---
@@ -380,13 +365,13 @@ st.subheader("🎬 Animated Video")
 
 # Video button uses the selected quality
 if st.button(f"✨ Generate {quality_name} Video"):
-    with st.spinner(f"Rendering 6-second MP4 video..."):
-        try:
-            mp4_bytes = generate_mp4(aspect_ratio_name, color_theme, book, chapter, verse_num, hook, bg_anim, txt_anim, quality_name)
-            st.video(mp4_bytes, format="video/mp4")
-            st.download_button("⬇️ Download Animated MP4", data=mp4_bytes, file_name=f"verse_animated_{final_ref.replace(' ', '_').replace(':', '')}.mp4", mime="video/mp4")
-        except Exception as e:
-            st.error(f"Video generation failed. Error: {e}")
+    # The spinner text is now integrated with the progress bar
+    try:
+        mp4_bytes = generate_mp4(aspect_ratio_name, color_theme, book, chapter, verse_num, hook, bg_anim, txt_anim, quality_name)
+        st.video(mp4_bytes, format="video/mp4")
+        st.download_button("⬇️ Download Animated MP4", data=mp4_bytes, file_name=f"verse_animated_{final_ref.replace(' ', '_').replace(':', '')}.mp4", mime="video/mp4")
+    except Exception as e:
+        st.error(f"Video generation failed. Error: {e}")
 
 st.markdown("---")
 st.text_area("Copy Caption for Social Media", f"{hook} Read {final_ref} today. #dailyverse #faith", height=150)
