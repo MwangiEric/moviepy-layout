@@ -1,18 +1,19 @@
 import streamlit as st
-from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
-import io, os, requests, random, math, time, textwrap
+from PIL import Image, ImageDraw, ImageFont
+import io, os, requests, math, time, textwrap
 from moviepy.editor import VideoClip 
 import numpy as np
 
-# --- CONFIGURATION & CONSTANTS ---
+# --- 1. CONFIGURATION & CONSTANTS ---
 st.set_page_config(page_title="✝️ Verse Studio Premium", page_icon="✝️", layout="wide")
 
 W, H = 1080, 1920 
 MARGIN = 100
 DEFAULT_VERSE_TEXT = "God is our refuge and strength, an ever-present help in trouble." 
-DEFAULT_REF = "Psalm 46:1 (ASV)" # Updated default ref to reflect ASV translation
+MAX_WRAP_WIDTH = 900 # Maximum pixel width for text within the canvas
+# Max width is W - 2 * MARGIN - 100 padding
 
-# --- NEW: Centralized Design Configuration (JSON Structure) ---
+# --- Centralized Design Configuration (JSON Structure) ---
 DESIGN_CONFIG = {
     "palettes": {
         "Faint Beige (Light)": {"bg": ["#faf9f6", "#e0e4d5"], "accent": "#c4891f", "text": "#183028"},
@@ -38,15 +39,7 @@ BG_ANIMATIONS = DESIGN_CONFIG["bg_animations"]
 ASPECT_RATIOS = DESIGN_CONFIG["aspect_ratios"]
 VIDEO_QUALITIES = DESIGN_CONFIG["video_qualities"]
 
-
-# Helper function to convert hex string to RGB tuple
-def hex_to_rgb(hex_color):
-    if hex_color.startswith('#'):
-        hex_color = hex_color[1:]
-    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-
 # BIBLE DATA (Simplified for Selection)
-# Use lowercase book names for the API
 BIBLE_STRUCTURE = {
     "Genesis": {1: 31, 2: 25}, 
     "Psalm": {1: 6, 46: 11, 121: 8}, 
@@ -55,7 +48,33 @@ BIBLE_STRUCTURE = {
 }
 BOOK_NAMES = list(BIBLE_STRUCTURE.keys())
 
-# --- FONT & CACHING FUNCTIONS ---
+# --- 2. SESSION STATE INITIALIZATION (Fixes "Error tried to use sessions before initiation") ---
+# Initialize all necessary state variables
+if 'aspect_ratio_name' not in st.session_state:
+    st.session_state.aspect_ratio_name = list(ASPECT_RATIOS.keys())[0]
+if 'color_theme' not in st.session_state:
+    st.session_state.color_theme = PALETTE_NAMES[0]
+if 'bg_anim' not in st.session_state:
+    st.session_state.bg_anim = BG_ANIMATIONS[1] # Default to Cross Orbit
+if 'txt_anim' not in st.session_state:
+    st.session_state.txt_anim = TEXT_ANIMATIONS[1] # Default to Glow Pulse
+if 'quality_name' not in st.session_state:
+    st.session_state.quality_name = list(VIDEO_QUALITIES.keys())[1]
+if 'book' not in st.session_state:
+    st.session_state.book = BOOK_NAMES[0]
+if 'chapter' not in st.session_state:
+    st.session_state.chapter = list(BIBLE_STRUCTURE[st.session_state.book].keys())[0]
+if 'verse_num' not in st.session_state:
+    st.session_state.verse_num = 1
+if 'hook' not in st.session_state:
+    st.session_state.hook = "Need strength today?"
+
+# --- 3. FONT & CACHING FUNCTIONS (REMAINS THE SAME) ---
+
+def hex_to_rgb(hex_color):
+    if hex_color.startswith('#'):
+        hex_color = hex_color[1:]
+    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
 @st.cache_data(ttl=3600)
 def download_font():
@@ -70,50 +89,71 @@ def download_font():
 
 FONT_PATH = download_font()
 
-# Load Fonts (Error handling simplified)
 HOOK_FONT, VERSE_FONT, REF_FONT = ImageFont.load_default(), ImageFont.load_default(), ImageFont.load_default() 
 try:
-    HOOK_FONT, VERSE_FONT, REF_FONT = (
-        ImageFont.truetype(FONT_PATH, 80),
-        ImageFont.truetype(FONT_PATH, 110),
-        ImageFont.truetype(FONT_PATH, 48),
-    )
+    HOOK_FONT = ImageFont.truetype(FONT_PATH, 80)
+    VERSE_FONT = ImageFont.truetype(FONT_PATH, 110)
+    REF_FONT = ImageFont.truetype(FONT_PATH, 48)
 except Exception:
     pass
 
+
 @st.cache_data(ttl=1800)
 def fetch_verse(book_name: str, chapter: int, verse_num: int) -> str:
-    """
-    NEW: Fetches verse text from CDN URL using requests.
-    """
+    """Fetches verse text from CDN URL using requests."""
     book_lower = book_name.lower()
-    
-    # Construct the CDN URL
     url = f"https://cdn.jsdelivr.net/gh/wldeh/bible-api/bibles/en-asv/books/{book_lower}/chapters/{chapter}/verses/{verse_num}.json"
     
     try:
         response = requests.get(url, timeout=5)
-        response.raise_for_status() # Raise an HTTPError if the status is 4xx or 5xx
+        response.raise_for_status()
         data = response.json()
-        
-        # The text field is reliable in this API structure
         verse_text = data.get("text")
-        
         return verse_text.strip() if verse_text else DEFAULT_VERSE_TEXT
-        
-    except requests.exceptions.RequestException as e:
-        # Handle network or JSON decoding errors
+    except requests.exceptions.RequestException:
         return DEFAULT_VERSE_TEXT
     except Exception:
         return DEFAULT_VERSE_TEXT
 
-# --- DRAWING HELPERS ---
+# --- 4. DRAWING HELPERS ---
 
 def get_text_size(font, text):
     if not text: return 0, 0
+    # Use getbbox for width/height calculation
     bbox = font.getbbox(text)
     return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
+# NEW: Smart wrapping function
+def smart_wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list:
+    """
+    Splits text into lines, ensuring each line's pixel width is less than max_width.
+    """
+    words = text.split()
+    if not words:
+        return [""]
+    
+    lines = []
+    current_line = words[0]
+    
+    for word in words[1:]:
+        test_line = current_line + " " + word
+        # Get the width of the test line
+        try:
+            width, _ = get_text_size(font, test_line)
+        except Exception:
+            # Fallback to simple char count if font loading fails
+            width = len(test_line) * 50 
+
+        if width <= max_width:
+            current_line = test_line
+        else:
+            lines.append(current_line)
+            current_line = word
+            
+    lines.append(current_line)
+    return lines
+
+# Gradient and animation helpers (omitted for brevity, assumed included)
 def create_gradient(w, h, c1_hex, c2_hex):
     img = Image.new("RGB", (w, h))
     draw = ImageDraw.Draw(img)
@@ -126,8 +166,6 @@ def create_gradient(w, h, c1_hex, c2_hex):
         b = int((1-ratio)*c1_rgb[2] + ratio*c2_rgb[2])
         draw.line([(x, 0), (x, h)], fill=(r, g, b))
     return img.convert("RGBA")
-
-# Draw helpers for animations remain the same (draw_cross, draw_waving_gradient, draw_floating_circles, draw_rotating_rectangle)
 
 def draw_cross(draw, cx, cy, size=100, phase=0):
     pulse = 1 + 0.1 * math.sin(phase)
@@ -146,16 +184,15 @@ def draw_rotating_rectangle(base, draw, box_xy, angle, color_hex):
     draw.rectangle([rect_x1 + offset_x, rect_y1 + offset_y, rect_x2 + offset_x, rect_y2 + offset_y], outline=hex_to_rgb(color_hex) + (80,), width=8)
 
 
-# --- CORE DRAWING FUNCTION ---
+# --- 5. CORE DRAWING FUNCTION ---
 
 def generate_poster(aspect_ratio_name, palette_name, book, chapter, verse_num, hook, bg_anim, txt_anim, animation_phase=None):
-    """Generates a single poster frame with custom quote and separator drawing."""
+    """Generates a single poster frame."""
     
     global W, H
     W, H = ASPECT_RATIOS[aspect_ratio_name]
-    final_ref = f"{book} {chapter}:{verse_num} (ASV)" # Add translation name
+    final_ref = f"{book} {chapter}:{verse_num} (ASV)"
     
-    # FETCH VERSE 
     verse_text_raw = fetch_verse(book, chapter, verse_num)
     
     pal = DESIGN_CONFIG["palettes"][palette_name]
@@ -168,7 +205,7 @@ def generate_poster(aspect_ratio_name, palette_name, book, chapter, verse_num, h
     box_xy = (box_x, box_y, box_x + box_w, box_y + box_h)
     phase = animation_phase if animation_phase is not None else time.time() % (2 * math.pi)
 
-    # Background Animations (1 & 2)
+    # Background Animations
     draw_rotating_rectangle(base, draw, box_xy, phase * 0.2, pal["accent"])
     if bg_anim == "Cross Orbit (Geometric)":
         draw_cross(draw, W//4, H//3, 120, phase * 1.5)
@@ -180,10 +217,12 @@ def generate_poster(aspect_ratio_name, palette_name, book, chapter, verse_num, h
     draw.rounded_rectangle(box_xy, radius=40, fill=box_color)
 
     # Layout calculation
-    max_text_width = box_w - 100
-    hook_lines = textwrap.wrap(hook, width=30) 
-    verse_lines = textwrap.wrap(verse_text_raw, width=25) 
-    ref_lines = textwrap.wrap(final_ref, width=30) 
+    max_text_width_pixels = box_w - 100 # Define max width for text inside the box
+    
+    # NEW: Use smart_wrap_text for precise layout control
+    hook_lines = smart_wrap_text(hook, HOOK_FONT, max_text_width_pixels)
+    verse_lines = smart_wrap_text(verse_text_raw, VERSE_FONT, max_text_width_pixels) 
+    ref_lines = smart_wrap_text(final_ref, REF_FONT, max_text_width_pixels)
 
     line_h_hook = HOOK_FONT.getbbox("A")[3] + 10 
     line_h_verse = VERSE_FONT.getbbox("A")[3] + 8 
@@ -261,7 +300,7 @@ def generate_poster(aspect_ratio_name, palette_name, book, chapter, verse_num, h
 
     return np.array(base.convert('RGB')) if animation_phase is not None else base, verse_text_raw, final_ref
 
-# --- VIDEO GENERATOR (MoviePy) ---
+# --- 6. VIDEO GENERATOR (MoviePy Fix) ---
 
 def generate_mp4(aspect_ratio_name, palette_name, book, chapter, verse_num, hook, bg_anim, txt_anim, quality_name):
     
@@ -273,77 +312,79 @@ def generate_mp4(aspect_ratio_name, palette_name, book, chapter, verse_num, hook
     clip = VideoClip(make_frame, duration=duration)
     temp_filename = f"temp_video_{time.time()}.mp4"
     
-    progress_bar = st.progress(0, text="Starting video render...")
-
-    def progress_callback(T):
-        if T is not None and T > 0:
-            percent = min(100, int((T / duration) * 100))
-            progress_bar.progress(percent, text=f"Rendering frame: {T:.1f}s / {duration}s")
-        elif T is None:
-            progress_bar.progress(100, text="Render complete! Reading file...")
-
-    clip.write_videofile(
-        temp_filename, 
-        fps=fps, 
-        codec='libx264', 
-        audio=False,     
-        verbose=False, 
-        logger=None,
-        progress_callback=progress_callback
-    )
+    # FIX: Removed the unsupported 'progress_callback' argument and reverted to st.spinner
+    with st.spinner("Rendering video... This may take a moment."):
+        clip.write_videofile(
+            temp_filename, 
+            fps=fps, 
+            codec='libx264', 
+            audio=False,     
+            verbose=False, 
+            logger=None
+            # progress_callback=progress_callback # REMOVED DUE TO ERROR
+        )
     
     with open(temp_filename, "rb") as f:
         video_bytes = f.read()
         
     os.remove(temp_filename)
-    progress_bar.empty()
     return video_bytes
 
-# --- STREAMLIT UI ---
+# --- 7. STREAMLIT UI (Using Session State) ---
 
 st.title("✝️ Verse Studio Premium")
 
 # --- UI CONTROLS ---
 
-# Global Aspect Ratio Control
-aspect_ratio_name = st.selectbox("🎥 Output Aspect Ratio", list(ASPECT_RATIOS.keys()))
-W, H = ASPECT_RATIOS[aspect_ratio_name] 
-
 col1, col2 = st.columns([1, 1.5])
 
 with col1:
     st.subheader("🎨 Design & Animation")
-    color_theme = st.selectbox("Color Theme", PALETTE_NAMES)
+    
+    # Store selection directly in session_state to trigger redraws
+    st.selectbox("🎥 Output Aspect Ratio", list(ASPECT_RATIOS.keys()), key='aspect_ratio_name')
+    st.selectbox("Color Theme", PALETTE_NAMES, key='color_theme')
     
     st.markdown("---")
     
-    bg_anim = st.selectbox("Background Animation", BG_ANIMATIONS, index=1)
-    txt_anim = st.selectbox("Text Animation", TEXT_ANIMATIONS, index=1)
+    # Store animation selection directly in session_state
+    st.selectbox("Background Animation", BG_ANIMATIONS, key='bg_anim')
+    st.selectbox("Text Animation", TEXT_ANIMATIONS, key='txt_anim')
     
-    quality_name = st.selectbox("Video Quality", list(VIDEO_QUALITIES.keys()), index=1)
+    # Store quality selection directly in session_state
+    st.selectbox("Video Quality", list(VIDEO_QUALITIES.keys()), key='quality_name')
     
 with col2:
     st.subheader("📖 Verse Selection")
     
     # --- Interactive Verse Selection ---
-    book = st.selectbox("Book", BOOK_NAMES, index=BOOK_NAMES.index("Genesis"))
+    # Update state on change
+    st.selectbox("Book", BOOK_NAMES, key='book')
     
-    available_chapters = list(BIBLE_STRUCTURE.get(book, {}).keys())
-    default_chapter_index = 0
-    chapter = st.selectbox("Chapter", available_chapters, index=default_chapter_index)
+    available_chapters = list(BIBLE_STRUCTURE.get(st.session_state.book, {}).keys())
+    st.selectbox("Chapter", available_chapters, key='chapter')
 
-    max_verses = BIBLE_STRUCTURE.get(book, {}).get(chapter, 1)
+    max_verses = BIBLE_STRUCTURE.get(st.session_state.book, {}).get(st.session_state.chapter, 1)
     available_verses = list(range(1, max_verses + 1))
-    default_verse_index = 0
-    verse_num = st.selectbox("Verse", available_verses, index=default_verse_index)
+    st.selectbox("Verse", available_verses, key='verse_num')
     
-    hook = st.text_input("Engagement Hook", "Need strength today?")
+    st.text_input("Engagement Hook", value=st.session_state.hook, key='hook')
 
 st.markdown("---")
 
 # --- Poster Generation and Display ---
-poster_img, verse_text, final_ref = generate_poster(aspect_ratio_name, color_theme, book, chapter, verse_num, hook, bg_anim, txt_anim)
-st.image(poster_img, caption=f"{color_theme} | {aspect_ratio_name} | Ref: {final_ref}", use_column_width=True)
+# Use session state variables for drawing
+poster_img, verse_text, final_ref = generate_poster(
+    st.session_state.aspect_ratio_name, 
+    st.session_state.color_theme, 
+    st.session_state.book, 
+    st.session_state.chapter, 
+    st.session_state.verse_num, 
+    st.session_state.hook, 
+    st.session_state.bg_anim, 
+    st.session_state.txt_anim
+)
+st.image(poster_img, caption=f"{st.session_state.color_theme} | {st.session_state.aspect_ratio_name} | Ref: {final_ref}", use_column_width=True)
 
 st.write(f"**Fetched Verse:** {verse_text}")
 st.markdown("---")
@@ -356,15 +397,26 @@ st.download_button("⬇️ Download Static Poster PNG", data=buf.getvalue(), fil
 # 2. Animated Video Feature (MP4)
 st.subheader("🎬 Animated Video")
 
-if st.button(f"✨ Generate {quality_name} Video"):
+if st.button(f"✨ Generate {st.session_state.quality_name} Video"):
     try:
-        mp4_bytes = generate_mp4(aspect_ratio_name, color_theme, book, chapter, verse_num, hook, bg_anim, txt_anim, quality_name)
+        # Use session state variables for generation
+        mp4_bytes = generate_mp4(
+            st.session_state.aspect_ratio_name, 
+            st.session_state.color_theme, 
+            st.session_state.book, 
+            st.session_state.chapter, 
+            st.session_state.verse_num, 
+            st.session_state.hook, 
+            st.session_state.bg_anim, 
+            st.session_state.txt_anim, 
+            st.session_state.quality_name
+        )
         st.video(mp4_bytes, format="video/mp4")
         st.download_button("⬇️ Download Animated MP4", data=mp4_bytes, file_name=f"verse_animated_{final_ref.replace(' ', '_').replace(':', '')}.mp4", mime="video/mp4")
     except Exception as e:
         st.error(f"Video generation failed. Error: {e}")
 
 st.markdown("---")
-st.text_area("Copy Caption for Social Media", f"{hook} Read {final_ref} today. #dailyverse #faith", height=150)
+st.text_area("Copy Caption for Social Media", f"{st.session_state.hook} Read {final_ref} today. #dailyverse #faith", height=150)
 
 st.info("📓 Dynamic hook and journaling features are next!")
