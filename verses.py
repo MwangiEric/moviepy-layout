@@ -147,17 +147,21 @@ def download_font(font_name):
     path = f"{font_name}.ttf"
     if not os.path.exists(path):
         if font_name == "Poppins-Bold":
-            url = "https://github.com/google/fonts/blob/main/ofl/poppins/Poppins-Bold.ttf"
+            # Change URL to raw content link
+            url = "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-Bold.ttf" 
         elif font_name == "Roboto-Regular":
-            url = "https://github.com/google/fonts/blob/main/ofl/poppins/Poppins-Regular.ttf"
+            # Change URL to raw content link
+            url = "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-Regular.ttf"
         else:
             return None 
+        # ... (rest of the download logic remains the same)
         try:
             r = requests.get(url, timeout=10)
             r.raise_for_status()
             with open(path, "wb") as f: f.write(r.content)
         except Exception as e:
-            st.error(f"Failed to download font '{font_name}'. Error: {e}")
+            # Added a clear error message in case of download failure
+            st.error(f"Failed to download font '{font_name}' from raw link. Error: {e}") 
             return None
     return path
 
