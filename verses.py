@@ -106,7 +106,6 @@ def get_text_size(font, text):
     bbox = font.getbbox(text)
     return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-@st.cache_data
 def smart_wrap_text(text: str, font, max_width: int) -> list:
     words = text.split()
     if not words: return [""]
