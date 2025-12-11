@@ -259,9 +259,9 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
     verse_lines = smart_wrap_text(verse_text_raw, VERSE_FONT, max_text_width_pixels) 
     ref_lines = smart_wrap_text(final_ref, REF_FONT, max_text_width_pixels)
 
-    line_h_hook = HOOK_FONT.getbbox("A")[3] + 10 
-    line_h_verse = VERSE_FONT.getbbox("A")[3] + 8 
-    line_h_ref = REF_FONT.getbbox("A")[3] + 6   
+    line_h_hook = (HOOK_FONT.getbbox("A")[3] + 10) * 1.5  # 50% more spacing
+    line_h_verse = (VERSE_FONT.getbbox("A")[3] + 8) * 1.5  # 50% more spacing
+    line_h_ref = (REF_FONT.getbbox("A")[3] + 6) * 1.5  # 50% more spacing  
     
     content_height = (len(hook_lines) * line_h_hook) + (len(verse_lines) * line_h_verse) + (len(ref_lines) * line_h_ref) + 120
     
@@ -293,7 +293,7 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
         draw.text(((W - w)//2, current_y), line, font=HOOK_FONT, fill=hook_color)
         current_y += line_h_hook
     
-    current_y += 40 
+    current_y += 60 
 
     # --- Verse Text Drawing with Premium Animations ---
     
@@ -356,7 +356,7 @@ def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_
 
     current_y = y_anim 
 
-    current_y += 40 
+    current_y += 60
     ref_color = (*hex_to_rgb(pal["text_secondary"]), 255)
     w, h = get_text_size(REF_FONT, final_ref)
     draw.text(((W - w)//2, current_y), final_ref, font=REF_FONT, fill=ref_color)
