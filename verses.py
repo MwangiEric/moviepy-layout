@@ -100,7 +100,6 @@ def hex_to_rgb(hex_color):
     if hex_color.startswith('#'): hex_color = hex_color[1:]
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
-@st.cache_data
 def get_text_size(font, text):
     if not text: return 0, 0
     bbox = font.getbbox(text)
@@ -148,9 +147,9 @@ def download_font(font_name):
     path = f"{font_name}.ttf"
     if not os.path.exists(path):
         if font_name == "Poppins-Bold":
-            url = "https://github.com/google/fonts/raw/main/ofl/poppins/static/Poppins-Bold.ttf"
+            url = "https://github.com/google/fonts/blob/main/ofl/poppins/Poppins-Bold.ttf"
         elif font_name == "Roboto-Regular":
-            url = "https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Regular.ttf"
+            url = "https://github.com/google/fonts/blob/main/ofl/poppins/Poppins-Regular.ttf"
         else:
             return None 
         try:
