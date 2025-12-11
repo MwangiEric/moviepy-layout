@@ -166,10 +166,10 @@ FONT_PATH_REGULAR = download_font("Roboto-Regular")
 
 HOOK_FONT = VERSE_FONT = REF_FONT = ImageFont.load_default() 
 try:
-    if FONT_PATH_BOLD: HOOK_FONT = ImageFont.truetype(FONT_PATH_BOLD, 80)
+    if FONT_PATH_BOLD: HOOK_FONT = ImageFont.truetype(FONT_PATH_BOLD, 120)
     if FONT_PATH_REGULAR: 
-        VERSE_FONT = ImageFont.truetype(FONT_PATH_REGULAR, 110) 
-        REF_FONT = ImageFont.truetype(FONT_PATH_REGULAR, 48)
+        VERSE_FONT = ImageFont.truetype(FONT_PATH_REGULAR, 210) 
+        REF_FONT = ImageFont.truetype(FONT_PATH_REGULAR, 80)
 except Exception: pass
 
 @st.cache_data(ttl=1800)
