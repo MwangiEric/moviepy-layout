@@ -1,4 +1,4 @@
-Import streamlit as st
+import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 import io, os, requests, math, time
 from moviepy.editor import VideoClip, CompositeVideoClip, AudioFileClip, VideoFileClip, vfx
