@@ -187,9 +187,9 @@ FONT_PATH_BOLD = download_font("Poppins-Bold")
 FONT_PATH_REGULAR = download_font("Roboto-Regular")
 
 # --- ADJUSTED FONT SIZES (Reduced from 120, 210, 80) ---
-HOOK_FONT_SIZE = 100 
-VERSE_FONT_SIZE = 180 
-REF_FONT_SIZE = 70 
+HOOK_FONT_SIZE = 70 
+VERSE_FONT_SIZE = 150 
+REF_FONT_SIZE = 40 
 
 HOOK_FONT = ImageFont.load_default()
 VERSE_FONT = ImageFont.load_default()
