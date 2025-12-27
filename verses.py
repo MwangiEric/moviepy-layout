@@ -7,26 +7,29 @@ from moviepy.editor import VideoClip, CompositeVideoClip, vfx
 # ============================================================================
 # STREAMLIT SETUP
 # ============================================================================
-st.set_page_config(page_title="Verse Studio", page_icon="✝️", layout="wide")
+st.set_page_config(page_title="Still Mind", page_icon="✝️", layout="wide")
 
 # ============================================================================
-# SIMPLE CONFIGURATION
+# THEME CONFIGURATION - GREEN & DARK BLUE
 # ============================================================================
 COLORS = {
-    "Still Mind Green": {
-        "bg": [(20, 40, 60, 255), (30, 60, 90, 255)],
-        "accent": (76, 175, 80, 255),
-        "text": (255, 255, 255, 255)
+    "Still Mind": {
+        "bg": [(10, 30, 50, 255), (20, 50, 80, 255)],  # Dark blue gradient
+        "accent": (76, 175, 80, 255),  # Bright green
+        "text": (255, 255, 255, 255),  # White text
+        "secondary": (180, 220, 180, 255)  # Light green
     },
-    "Galilee Morning": {
-        "bg": [(250, 249, 246, 255), (224, 228, 213, 255)],
-        "accent": (196, 137, 31, 255),
-        "text": (24, 48, 40, 255)
+    "Ocean Deep": {
+        "bg": [(10, 40, 70, 255), (20, 60, 100, 255)],
+        "accent": (0, 200, 200, 255),  # Cyan
+        "text": (255, 255, 255, 255),
+        "secondary": (180, 240, 240, 255)
     },
-    "Deep Slate": {
-        "bg": [(15, 30, 30, 255), (35, 65, 65, 255)],
-        "accent": (252, 191, 73, 255),
-        "text": (240, 240, 240, 255)
+    "Forest Night": {
+        "bg": [(10, 30, 20, 255), (20, 50, 30, 255)],
+        "accent": (100, 200, 100, 255),  # Forest green
+        "text": (240, 240, 240, 255),
+        "secondary": (200, 220, 200, 255)
     }
 }
 
@@ -40,22 +43,68 @@ BACKGROUNDS = ["Gradient", "Abstract", "Particles", "Geometric"]
 BIBLE_BOOKS = ["Psalm", "Matthew", "John", "Romans", "Ephesians", "Philippians", "James"]
 
 # ============================================================================
-# SMART FONT SIZING
+# IMPROVED FONT LOADING
+# ============================================================================
+def load_font_safe(size, bold=False, italic=False):
+    """Try multiple font files before falling back to default."""
+    font_paths = []
+    
+    if bold and italic:
+        font_paths.extend([
+            "arialbi.ttf", "Arial-BoldItalic.ttf", "Helvetica-BoldOblique.ttf",
+            "DejaVuSans-BoldOblique.ttf", "LiberationSans-BoldItalic.ttf"
+        ])
+    elif bold:
+        font_paths.extend([
+            "arialbd.ttf", "Arial-Bold.ttf", "Helvetica-Bold.ttf",
+            "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf"
+        ])
+    elif italic:
+        font_paths.extend([
+            "ariali.ttf", "Arial-Italic.ttf", "Helvetica-Oblique.ttf",
+            "DejaVuSans-Oblique.ttf", "LiberationSans-Italic.ttf"
+        ])
+    else:
+        font_paths.extend([
+            "arial.ttf", "Arial.ttf", "Helvetica.ttf",
+            "DejaVuSans.ttf", "LiberationSans-Regular.ttf"
+        ])
+    
+    # Also try common font directories
+    font_dirs = [
+        "/usr/share/fonts/truetype/",
+        "/usr/local/share/fonts/",
+        "C:/Windows/Fonts/",
+        "/Library/Fonts/"
+    ]
+    
+    for font_dir in font_dirs:
+        if os.path.exists(font_dir):
+            for font_file in os.listdir(font_dir):
+                if font_file.lower().endswith('.ttf'):
+                    # Check if it's a generic sans-serif font
+                    lower_name = font_file.lower()
+                    if any(x in lower_name for x in ['arial', 'helvetica', 'dejavu', 'liberation']):
+                        font_paths.append(os.path.join(font_dir, font_file))
+    
+    for font_path in font_paths:
+        try:
+            if os.path.exists(font_path):
+                return ImageFont.truetype(font_path, size)
+        except:
+            continue
+    
+    # Only use default as absolute last resort
+    return ImageFont.load_default(size)
+
+# ============================================================================
+# SMART FONT SIZING (LARGER DEFAULTS)
 # ============================================================================
 def calculate_font_size(text, target_size, min_size, max_width, max_height):
-    """Dynamically adjust font size based on text length."""
-    # Try to load arial font
-    try:
-        font = ImageFont.truetype("arial.ttf", target_size)
-    except:
-        font = ImageFont.load_default()
-    
-    # Start with target size and reduce until it fits
-    for size in range(target_size, min_size - 1, -2):
-        try:
-            font = ImageFont.truetype("arial.ttf", size)
-        except:
-            font = ImageFont.load_default()
+    """Dynamically adjust font size based on text length - with larger defaults."""
+    # Start with target size
+    for size in range(target_size, min_size - 1, -3):
+        font = load_font_safe(size)
         
         # Simple word wrap calculation
         words = text.split()
@@ -79,18 +128,13 @@ def calculate_font_size(text, target_size, min_size, max_width, max_height):
         
         # Calculate total height
         line_height = font.getbbox("A")[3] - font.getbbox("A")[1]
-        total_height = len(lines) * line_height * 1.2
+        total_height = len(lines) * line_height * 1.3  # Increased spacing
         
         if total_height <= max_height:
             return size, lines, font
     
     # If we get here, use minimum size
-    try:
-        font = ImageFont.truetype("arial.ttf", min_size)
-    except:
-        font = ImageFont.load_default()
-    
-    return min_size, [text], font
+    return min_size, [text], load_font_safe(min_size)
 
 # ============================================================================
 # BACKGROUND GENERATORS
@@ -103,9 +147,13 @@ def create_background(width, height, style, colors, time_offset=0):
     color1, color2 = colors["bg"]
     
     if style == "Gradient":
-        # Simple gradient
+        # Enhanced gradient with more colors
         for y in range(height):
             ratio = y / height
+            # Add some variation for visual interest
+            variation = math.sin(y / 100 + time_offset) * 0.1
+            ratio = max(0, min(1, ratio + variation))
+            
             r = int((1-ratio) * color1[0] + ratio * color2[0])
             g = int((1-ratio) * color1[1] + ratio * color2[1])
             b = int((1-ratio) * color1[2] + ratio * color2[2])
@@ -113,53 +161,54 @@ def create_background(width, height, style, colors, time_offset=0):
             draw.line([(0, y), (width, y)], fill=(r, g, b, a))
     
     elif style == "Abstract":
-        # Abstract moving shapes
-        for i in range(5):
-            offset = int(time_offset * 100) % 1000
-            size = 100 + int(50 * math.sin(time_offset + i))
-            x = int(width * (0.2 * i) + offset % 300)
-            y = int(height * 0.5 + 100 * math.cos(time_offset + i))
+        # Green-themed abstract shapes
+        for i in range(8):
+            offset = int(time_offset * 80) % 1000
+            size = 120 + int(60 * math.sin(time_offset + i))
+            x = int(width * (0.15 * i) + offset % 400)
+            y = int(height * 0.5 + 150 * math.cos(time_offset * 1.5 + i))
             
-            # Draw abstract shape
+            # Draw abstract green shape
+            opacity = int(100 + 100 * math.sin(time_offset + i))
+            shape_color = colors["accent"][:3] + (opacity,)
+            
             draw.ellipse([x, y, x+size, y+size], 
-                        outline=colors["accent"], 
-                        width=3)
-            
-            # Smaller inner shape
-            draw.ellipse([x+20, y+20, x+size-20, y+size-20], 
-                        outline=colors["accent"], 
-                        width=2)
+                        outline=shape_color, 
+                        width=4)
     
     elif style == "Particles":
-        # Particle effect
-        for i in range(50):
-            x = int(width * (0.5 + 0.4 * math.sin(time_offset + i * 0.2)))
-            y = int(height * (0.5 + 0.4 * math.cos(time_offset + i * 0.3)))
-            size = 2 + int(3 * math.sin(time_offset + i * 0.5))
+        # Green particle effect
+        for i in range(80):
+            x = int(width * (0.5 + 0.45 * math.sin(time_offset + i * 0.15)))
+            y = int(height * (0.5 + 0.45 * math.cos(time_offset + i * 0.2)))
+            size = 3 + int(4 * math.sin(time_offset + i * 0.3))
             
-            # Random opacity
-            opacity = int(150 + 100 * math.sin(time_offset + i))
+            # Green particles with varying opacity
+            opacity = int(180 + 70 * math.sin(time_offset * 2 + i))
             particle_color = colors["accent"][:3] + (opacity,)
             
             draw.ellipse([x-size, y-size, x+size, y+size], 
                         fill=particle_color)
     
     elif style == "Geometric":
-        # Geometric patterns
-        for i in range(10):
-            x = int(width * (0.1 + 0.08 * i) + time_offset * 10 % 200)
-            y = int(height * 0.3 + 50 * math.sin(time_offset + i))
+        # Geometric green patterns
+        for i in range(12):
+            x = int(width * (0.1 + 0.07 * i) + time_offset * 15 % 300)
+            y = int(height * 0.4 + 80 * math.sin(time_offset * 2 + i))
             
             # Draw geometric shape
             points = []
-            for j in range(6):
-                angle = 2 * math.pi * j / 6 + time_offset
-                px = x + 40 * math.cos(angle)
-                py = y + 40 * math.sin(angle)
+            sides = 6 + i % 3
+            for j in range(sides):
+                angle = 2 * math.pi * j / sides + time_offset
+                px = x + 60 * math.cos(angle)
+                py = y + 60 * math.sin(angle)
                 points.append((px, py))
             
             if len(points) > 2:
-                draw.polygon(points, outline=colors["accent"], width=2)
+                opacity = int(150 + 100 * math.sin(time_offset + i))
+                outline_color = colors["accent"][:3] + (opacity,)
+                draw.polygon(points, outline=outline_color, width=3)
     
     return img
 
@@ -168,15 +217,11 @@ def create_background(width, height, style, colors, time_offset=0):
 # ============================================================================
 def draw_typewriter_text(draw, text_lines, font, x, y, line_height, progress, colors):
     """Draw text with typewriter animation."""
-    # Calculate total characters
     full_text = " ".join(text_lines)
     total_chars = len(full_text)
     visible_chars = int(total_chars * progress)
     
-    # Build visible text
     visible_text = full_text[:visible_chars]
-    
-    # Split into visible lines
     words = visible_text.split()
     visible_lines = []
     current_line = ""
@@ -184,7 +229,7 @@ def draw_typewriter_text(draw, text_lines, font, x, y, line_height, progress, co
     for word in words:
         test_line = f"{current_line} {word}".strip()
         bbox = font.getbbox(test_line)
-        if bbox[2] - bbox[0] <= 900:  # Max width
+        if bbox[2] - bbox[0] <= 900:
             current_line = test_line
         else:
             if current_line:
@@ -194,7 +239,6 @@ def draw_typewriter_text(draw, text_lines, font, x, y, line_height, progress, co
     if current_line:
         visible_lines.append(current_line)
     
-    # Draw visible lines
     current_y = y
     for line in visible_lines:
         bbox = font.getbbox(line)
@@ -203,21 +247,25 @@ def draw_typewriter_text(draw, text_lines, font, x, y, line_height, progress, co
                  line, font=font, fill=colors["text"])
         current_y += line_height
     
-    # Draw cursor
+    # Draw blinking cursor
     if progress < 1.0:
         if visible_lines:
             last_line = visible_lines[-1]
             bbox = font.getbbox(last_line)
-            cursor_x = (1080 - bbox[2]) // 2 + bbox[2] + 5
-            cursor_y = current_y - line_height + 10
-            draw.line([(cursor_x, cursor_y), (cursor_x, cursor_y + line_height - 20)], 
-                     fill=colors["accent"], width=3)
+            cursor_x = (1080 - bbox[2]) // 2 + bbox[2] + 8
+            cursor_y = current_y - line_height + 15
+            # Blinking effect
+            if int(time.time() * 2) % 2 == 0:
+                draw.line([(cursor_x, cursor_y), (cursor_x, cursor_y + line_height - 25)], 
+                         fill=colors["accent"], width=4)
     
     return current_y
 
 def draw_fade_text(draw, text_lines, font, x, y, line_height, progress, colors):
     """Draw text with fade-in animation."""
-    opacity = int(255 * progress)
+    # Smooth fade with easing
+    ease_progress = 1 - (1 - progress) ** 2
+    opacity = int(255 * ease_progress)
     text_color = colors["text"][:3] + (opacity,)
     
     current_y = y
@@ -231,10 +279,10 @@ def draw_fade_text(draw, text_lines, font, x, y, line_height, progress, colors):
     return current_y
 
 # ============================================================================
-# IMAGE GENERATION
+# IMAGE GENERATION WITH LARGER FONTS
 # ============================================================================
 def create_image(size_name, color_name, book, chapter, verse, hook, animation_type, bg_style):
-    """Create the verse image with smart layout."""
+    """Create the verse image with larger fonts."""
     width, height = SIZES[size_name]
     colors = COLORS[color_name]
     
@@ -250,43 +298,44 @@ def create_image(size_name, color_name, book, chapter, verse, hook, animation_ty
     text_box_width = 900
     text_box_x = (width - text_box_width) // 2
     
-    # Smart font sizing for verse
+    # LARGER font sizing for verse
     verse_size, verse_lines, verse_font = calculate_font_size(
         verse_text, 
-        target_size=130, 
-        min_size=60,
-        max_width=text_box_width - 40,
-        max_height=height * 0.5
+        target_size=150,  # Increased from 130
+        min_size=80,      # Increased from 60
+        max_width=text_box_width - 60,
+        max_height=height * 0.6
     )
     
-    # Other fonts
-    hook_font = ImageFont.truetype("arial.ttf", 70) if os.path.exists("arial.ttf") else ImageFont.load_default()
-    ref_font = ImageFont.truetype("arial.ttf", 40) if os.path.exists("arial.ttf") else ImageFont.load_default()
+    # Load other fonts (larger sizes)
+    hook_font = load_font_safe(85, bold=True)  # Increased from 70
+    ref_font = load_font_safe(48, bold=True)   # Increased from 40
     
     # Calculate verse box height
     verse_line_height = verse_font.getbbox("A")[3] - verse_font.getbbox("A")[1]
-    verse_height = len(verse_lines) * verse_line_height * 1.2
+    verse_height = len(verse_lines) * verse_line_height * 1.4  # More spacing
     
     # Calculate total box dimensions
-    box_padding = 60
+    box_padding = 70  # Increased padding
     box_height = verse_height + (box_padding * 2)
     box_y = (height - box_height) // 2
     
     # Draw semi-transparent background box
-    box_color = (0, 0, 0, 180)  # Semi-transparent black
+    box_color = (0, 0, 0, 160)  # Less opaque for better readability
     draw.rectangle([text_box_x, box_y, text_box_x + text_box_width, box_y + box_height], 
                   fill=box_color)
     
-    # Draw hook ABOVE the box (not inside)
+    # Draw hook ABOVE the box
     if hook:
         bbox = hook_font.getbbox(hook)
         hook_width = bbox[2] - bbox[0]
         hook_x = (width - hook_width) // 2
-        hook_y = box_y - 80  # Position above the box
+        hook_y = box_y - 100  # Further above
         
-        # Add a subtle background for hook
-        draw.rectangle([hook_x - 20, hook_y - 10, hook_x + hook_width + 20, hook_y + bbox[3] + 10], 
-                      fill=colors["accent"])
+        # Add a subtle green background for hook
+        hook_bg_color = colors["accent"][:3] + (220,)
+        draw.rectangle([hook_x - 25, hook_y - 15, hook_x + hook_width + 25, hook_y + bbox[3] + 15], 
+                      fill=hook_bg_color)
         
         draw.text((hook_x, hook_y), hook, font=hook_font, fill=colors["text"])
     
@@ -295,11 +344,11 @@ def create_image(size_name, color_name, book, chapter, verse, hook, animation_ty
     
     if animation_type == "Typewriter":
         verse_y = draw_typewriter_text(draw, verse_lines, verse_font, 
-                                      text_box_x, verse_y, verse_line_height * 1.2, 
+                                      text_box_x, verse_y, verse_line_height * 1.4, 
                                       1.0, colors)
     elif animation_type == "Fade":
         verse_y = draw_fade_text(draw, verse_lines, verse_font, 
-                                text_box_x, verse_y, verse_line_height * 1.2, 
+                                text_box_x, verse_y, verse_line_height * 1.4, 
                                 1.0, colors)
     else:
         # Normal text
@@ -309,24 +358,25 @@ def create_image(size_name, color_name, book, chapter, verse, hook, animation_ty
             line_width = bbox[2] - bbox[0]
             draw.text(((width - line_width) // 2, current_y), 
                      line, font=verse_font, fill=colors["text"])
-            current_y += verse_line_height * 1.2
+            current_y += verse_line_height * 1.4
         verse_y = current_y
     
     # Draw reference BELOW the box (bottom right corner)
     bbox = ref_font.getbbox(reference)
     ref_width = bbox[2] - bbox[0]
-    ref_x = text_box_x + text_box_width - ref_width - 20  # Right aligned
-    ref_y = box_y + box_height + 40  # Position below the box
+    ref_x = text_box_x + text_box_width - ref_width - 30  # Right aligned with margin
+    ref_y = box_y + box_height + 50  # Position below the box
     
-    # Add subtle background for reference
-    draw.rectangle([ref_x - 10, ref_y - 5, ref_x + ref_width + 10, ref_y + bbox[3] + 5], 
-                  fill=colors["accent"])
+    # Add green background for reference
+    ref_bg_color = colors["accent"][:3] + (220,)
+    draw.rectangle([ref_x - 15, ref_y - 10, ref_x + ref_width + 15, ref_y + bbox[3] + 10], 
+                  fill=ref_bg_color)
     
     draw.text((ref_x, ref_y), reference, font=ref_font, fill=colors["text"])
     
-    # Add "Still Mind" brand (top left)
-    brand_font = ImageFont.truetype("arial.ttf", 60) if os.path.exists("arial.ttf") else ImageFont.load_default()
-    draw.text((50, 50), "Still Mind", font=brand_font, fill=(76, 175, 80, 255))
+    # Add "Still Mind" brand (top left, larger)
+    brand_font = load_font_safe(70, bold=True)  # Increased from 60
+    draw.text((60, 60), "Still Mind", font=brand_font, fill=colors["accent"])
     
     return image, verse_text
 
@@ -334,7 +384,7 @@ def create_image(size_name, color_name, book, chapter, verse, hook, animation_ty
 # VIDEO GENERATION
 # ============================================================================
 def create_video(size_name, color_name, book, chapter, verse, hook, animation_type, bg_style):
-    """Create animated video."""
+    """Create animated video with larger fonts."""
     width, height = SIZES[size_name]
     colors = COLORS[color_name]
     duration = 6
@@ -348,10 +398,10 @@ def create_video(size_name, color_name, book, chapter, verse, hook, animation_ty
     text_box_width = 900
     verse_size, verse_lines, verse_font = calculate_font_size(
         verse_text, 
-        target_size=130, 
-        min_size=60,
-        max_width=text_box_width - 40,
-        max_height=height * 0.5
+        target_size=150, 
+        min_size=80,
+        max_width=text_box_width - 60,
+        max_height=height * 0.6
     )
     
     # Video frame generator
@@ -363,42 +413,49 @@ def create_video(size_name, color_name, book, chapter, verse, hook, animation_ty
         # Calculate text box
         text_box_x = (width - text_box_width) // 2
         verse_line_height = verse_font.getbbox("A")[3] - verse_font.getbbox("A")[1]
-        verse_height = len(verse_lines) * verse_line_height * 1.2
+        verse_height = len(verse_lines) * verse_line_height * 1.4
         
-        box_padding = 60
+        box_padding = 70
         box_height = verse_height + (box_padding * 2)
         box_y = (height - box_height) // 2
         
         # Draw semi-transparent box
-        box_color = (0, 0, 0, 180)
+        box_color = (0, 0, 0, 160)
         draw.rectangle([text_box_x, box_y, text_box_x + text_box_width, box_y + box_height], 
                       fill=box_color)
         
         # Draw hook above box
         if hook:
-            hook_font = ImageFont.truetype("arial.ttf", 70) if os.path.exists("arial.ttf") else ImageFont.load_default()
+            hook_font = load_font_safe(85, bold=True)
             bbox = hook_font.getbbox(hook)
             hook_width = bbox[2] - bbox[0]
             hook_x = (width - hook_width) // 2
-            hook_y = box_y - 80
+            hook_y = box_y - 100
             
-            draw.rectangle([hook_x - 20, hook_y - 10, hook_x + hook_width + 20, hook_y + bbox[3] + 10], 
-                          fill=colors["accent"])
+            # Animate hook background color
+            hook_brightness = 0.8 + 0.2 * math.sin(t * 3)
+            hook_bg_r = int(colors["accent"][0] * hook_brightness)
+            hook_bg_g = int(colors["accent"][1] * hook_brightness)
+            hook_bg_b = int(colors["accent"][2] * hook_brightness)
+            hook_bg_color = (hook_bg_r, hook_bg_g, hook_bg_b, 220)
+            
+            draw.rectangle([hook_x - 25, hook_y - 15, hook_x + hook_width + 25, hook_y + bbox[3] + 15], 
+                          fill=hook_bg_color)
             draw.text((hook_x, hook_y), hook, font=hook_font, fill=colors["text"])
         
         # Draw verse with animation
         verse_y = box_y + box_padding
         
         if animation_type == "Typewriter":
-            progress = min(1.0, t / (duration * 0.8))  # Typewriter completes at 80% of video
+            progress = min(1.0, t / (duration * 0.8))
             verse_y = draw_typewriter_text(draw, verse_lines, verse_font, 
-                                          text_box_x, verse_y, verse_line_height * 1.2, 
+                                          text_box_x, verse_y, verse_line_height * 1.4, 
                                           progress, colors)
         
         elif animation_type == "Fade":
-            progress = min(1.0, t / (duration * 0.5))  # Fade completes at 50% of video
+            progress = min(1.0, t / (duration * 0.5))
             verse_y = draw_fade_text(draw, verse_lines, verse_font, 
-                                    text_box_x, verse_y, verse_line_height * 1.2, 
+                                    text_box_x, verse_y, verse_line_height * 1.4, 
                                     progress, colors)
         
         else:
@@ -409,24 +466,24 @@ def create_video(size_name, color_name, book, chapter, verse, hook, animation_ty
                 line_width = bbox[2] - bbox[0]
                 draw.text(((width - line_width) // 2, current_y), 
                          line, font=verse_font, fill=colors["text"])
-                current_y += verse_line_height * 1.2
+                current_y += verse_line_height * 1.4
             verse_y = current_y
         
         # Draw reference below box
-        ref_font = ImageFont.truetype("arial.ttf", 40) if os.path.exists("arial.ttf") else ImageFont.load_default()
+        ref_font = load_font_safe(48, bold=True)
         bbox = ref_font.getbbox(reference)
         ref_width = bbox[2] - bbox[0]
-        ref_x = text_box_x + text_box_width - ref_width - 20
-        ref_y = box_y + box_height + 40
+        ref_x = text_box_x + text_box_width - ref_width - 30
+        ref_y = box_y + box_height + 50
         
         # Fade in reference
-        ref_opacity = int(255 * min(1.0, (t - duration * 0.7) / 0.3))
+        ref_opacity = int(220 * min(1.0, (t - duration * 0.7) / 0.3))
         if ref_opacity > 0:
-            ref_color = colors["accent"][:3] + (ref_opacity,)
-            text_color = colors["text"][:3] + (ref_opacity,)
+            ref_bg_color = colors["accent"][:3] + (ref_opacity,)
+            text_color = colors["text"][:3] + (255,)
             
-            draw.rectangle([ref_x - 10, ref_y - 5, ref_x + ref_width + 10, ref_y + bbox[3] + 5], 
-                          fill=ref_color)
+            draw.rectangle([ref_x - 15, ref_y - 10, ref_x + ref_width + 15, ref_y + bbox[3] + 10], 
+                          fill=ref_bg_color)
             draw.text((ref_x, ref_y), reference, font=ref_font, fill=text_color)
         
         # Convert to RGB for video
@@ -454,14 +511,15 @@ def get_verse(book, chapter, verse):
         url = f"https://bible-api.com/{book}+{chapter}:{verse}"
         response = requests.get(url, timeout=3)
         data = response.json()
-        return data.get("text", "God is our refuge and strength.").replace("\n", " ")
+        text = data.get("text", "God is our refuge and strength.")
+        return text.replace("\n", " ").strip()
     except:
         return "God is our refuge and strength, an ever-present help in trouble."
 
 # ============================================================================
 # STREAMLIT UI
 # ============================================================================
-st.title("🧠 Still Mind - Verse Studio")
+st.title("🧠 Still Mind")
 
 # Sidebar
 with st.sidebar:
@@ -500,7 +558,7 @@ with col1:
         st.download_button(
             "📥 Download PNG",
             data=img_bytes.getvalue(),
-            file_name=f"verse_{book}_{chapter}_{verse_num}.png",
+            file_name=f"stillmind_{book}_{chapter}_{verse_num}.png",
             mime="image/png",
             use_container_width=True
         )
@@ -516,7 +574,7 @@ with col1:
                     st.download_button(
                         "📥 Download MP4",
                         data=video_data,
-                        file_name=f"verse_{book}_{chapter}_{verse_num}.mp4",
+                        file_name=f"stillmind_{book}_{chapter}_{verse_num}.mp4",
                         mime="video/mp4",
                         use_container_width=True
                     )
@@ -539,7 +597,7 @@ with col2:
     
     caption = f"""{hook}
 
-"{verse_text[:150]}{'...' if len(verse_text) > 150 else ''}"
+"{verse_text[:180]}{'...' if len(verse_text) > 180 else ''}"
 
 📖 {reference}
 
@@ -556,7 +614,7 @@ with col2:
     
     # Info
     st.caption(f"**Size:** {size}")
-    st.caption(f"**Colors:** {color}")
+    st.caption(f"**Theme:** {color}")
     st.caption(f"**Background:** {bg_style}")
     st.caption(f"**Animation:** {animation_type}")
     st.caption(f"**Verse:** {reference}")
@@ -572,4 +630,4 @@ for file in os.listdir("."):
 
 # Footer
 st.divider()
-st.caption("Still Mind Verse Studio | Smart Font Sizing | Working Animations | Abstract Backgrounds")
+st.caption("Still Mind | Green & Blue Theme | Larger Fonts | Working Animations")
