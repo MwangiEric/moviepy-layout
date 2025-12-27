@@ -1,642 +1,575 @@
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 import io, os, requests, math, time
-from moviepy.editor import VideoClip, CompositeVideoClip, AudioFileClip, VideoFileClip, vfx
 import numpy as np
+from moviepy.editor import VideoClip, CompositeVideoClip, vfx
 
-# --- 0. STREAMLIT CONFIGURATION ---
-st.set_page_config(page_title="💎 Verse Studio Premium", page_icon="✝️", layout="wide")
+# ============================================================================
+# STREAMLIT SETUP
+# ============================================================================
+st.set_page_config(page_title="Verse Studio", page_icon="✝️", layout="wide")
 
-# --- 0.1. CLEANUP FUNCTION (Runs on session end/exit) ---
-def cleanup_temp_files():
-    """Removes temporary files created during media caching."""
-    files_to_delete = [f for f in os.listdir('.') if f.startswith('cached_media_') or f.endswith('.mp4') and f.startswith('final_video_')]
-    for f in files_to_delete:
-        try:
-            os.remove(f)
-        except Exception as e:
-            print(f"Error cleaning up file {f}: {e}")
-
-# --- 1. CORE CONSTANTS & MEDIA CONFIGURATION ---
-
-W, H = 1080, 1920 
-MARGIN = 100
-DEFAULT_VERSE_TEXT = "God is our refuge and strength, an ever-present help in trouble." 
-LOGO_URL = "https://ik.imagekit.io/ericmwangi/smlogo.png?updatedAt=1763071173037"
-LOGO_SIZE = 100
-
-# Centralized Design Configuration
-DESIGN_CONFIG = {
-    "palettes": {
-        "Galilee Morning (Light)": {"bg": ["#faf9f6", "#e0e4d5"], "accent": "#c4891f", "text_primary": "#183028", "text_secondary": "#5a5a5a"},
-        "Mount Zion Dusk (Light)": {"bg": ["#f4ebde", "#d6c7a9"], "accent": "#987919", "text_primary": "#292929", "text_secondary": "#555555"},
-        "Deep Slate (Dark)": {"bg": ["#0f1e1e", "#254141"], "accent": "#fcbf49", "text_primary": "#f0f0f0", "text_secondary": "#cccccc"},
-        "Urban Night (Dark)": {"bg": ["#202020", "#363636"], "accent": "#f7c59f", "text_primary": "#f1fafb", "text_secondary": "#dddddd"}
+# ============================================================================
+# SIMPLE CONFIGURATION
+# ============================================================================
+COLORS = {
+    "Still Mind Green": {
+        "bg": [(20, 40, 60, 255), (30, 60, 90, 255)],
+        "accent": (76, 175, 80, 255),
+        "text": (255, 255, 255, 255)
     },
-    "bg_animations": ["None", "Cross Orbit (Geometric)", "Wave Flow (Abstract)", "Floating Circles (Abstract)"],
-    "text_animations": ["None", "Glow Pulse", "Typewriter Effect", "Fade-in Opacity"],
-    "aspect_ratios": {"Reel / Story (9:16)": (1080, 1920), "Square Post (1:1)": (1080, 1080)},
-    "gradient_directions": ["Vertical", "Horizontal", "Diagonal"],
-    "video_qualities": {"Draft (6s / 12 FPS)": (6, 12), "Standard (6s / 24 FPS)": (6, 24), "High Quality (10s / 24 FPS)": (10, 24)}
-}
-
-# Media URLs
-MEDIA_CONFIG = {
-    "audio": {
-        "None": None,
-        "Advertising Music (New)": "https://ik.imagekit.io/ericmwangi/advertising-music-308403.mp4?updatedAt=1764101548797", 
-        "Ambient Strings (Placeholder)": "temp_audio_strings.mp3"
+    "Galilee Morning": {
+        "bg": [(250, 249, 246, 255), (224, 228, 213, 255)],
+        "accent": (196, 137, 31, 255),
+        "text": (24, 48, 40, 255)
     },
-    "video_bg": {
-        "None (Use Animated/Image)": None,
-        "Ocean Waves (New)": "https://ik.imagekit.io/ericmwangi/oceanbg.mp4?updatedAt=1764372632493",
+    "Deep Slate": {
+        "bg": [(15, 30, 30, 255), (35, 65, 65, 255)],
+        "accent": (252, 191, 73, 255),
+        "text": (240, 240, 240, 255)
     }
 }
 
-LOGO_PLACEMENTS = {
-    "Bottom Right": (1, 1), 
-    "Bottom Left": (0, 1),
-    "Top Right": (1, 0),
-    "Hidden": None
+SIZES = {
+    "TikTok": (1080, 1920),
+    "Square": (1080, 1080)
 }
 
-# Full Bible Book List
-FULL_BIBLE_BOOKS = [
-    "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel", 
-    "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther", "Job", "Psalm", "Proverbs", 
-    "Ecclesiastes", "Song of Solomon", "Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", 
-    "Amos", "Obadiah", "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi",
-    "Matthew", "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians", "2 Corinthians", "Galatians", "Ephesians", 
-    "Philippians", "Colossians", "1 Thessalonians", "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", 
-    "Hebrews", "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude", "Revelation"
-]
+BACKGROUNDS = ["Gradient", "Abstract", "Particles", "Geometric"]
 
-BIBLE_STRUCTURE = {
-    "Genesis": {1: 31, 2: 25, 3: 24}, 
-    "Psalm": {1: 6, 46: 11, 121: 8, 23: 6}, 
-    "John": {3: 36, 14: 31},
-    "Romans": {8: 39},
-    "Matthew": {5: 48, 6: 34, 7: 29},
-    "Revelation": {21: 27, 22: 21}
-}
-BOOK_NAMES = FULL_BIBLE_BOOKS
+BIBLE_BOOKS = ["Psalm", "Matthew", "John", "Romans", "Ephesians", "Philippians", "James"]
 
-PALETTE_NAMES = list(DESIGN_CONFIG["palettes"].keys())
-ASPECT_RATIOS = DESIGN_CONFIG["aspect_ratios"]
-VIDEO_QUALITIES = DESIGN_CONFIG["video_qualities"]
-TEXT_ANIMATIONS = DESIGN_CONFIG["text_animations"]
-BG_ANIMATIONS = DESIGN_CONFIG["bg_animations"]
-GRADIENT_DIRECTIONS = DESIGN_CONFIG["gradient_directions"]
+# ============================================================================
+# SMART FONT SIZING
+# ============================================================================
+def calculate_font_size(text, target_size, min_size, max_width, max_height):
+    """Dynamically adjust font size based on text length."""
+    # Try to load arial font
+    try:
+        font = ImageFont.truetype("arial.ttf", target_size)
+    except:
+        font = ImageFont.load_default()
+    
+    # Start with target size and reduce until it fits
+    for size in range(target_size, min_size - 1, -2):
+        try:
+            font = ImageFont.truetype("arial.ttf", size)
+        except:
+            font = ImageFont.load_default()
+        
+        # Simple word wrap calculation
+        words = text.split()
+        lines = []
+        current_line = []
+        
+        for word in words:
+            test_line = ' '.join(current_line + [word])
+            bbox = font.getbbox(test_line)
+            text_width = bbox[2] - bbox[0]
+            
+            if text_width <= max_width:
+                current_line.append(word)
+            else:
+                if current_line:
+                    lines.append(' '.join(current_line))
+                current_line = [word]
+        
+        if current_line:
+            lines.append(' '.join(current_line))
+        
+        # Calculate total height
+        line_height = font.getbbox("A")[3] - font.getbbox("A")[1]
+        total_height = len(lines) * line_height * 1.2
+        
+        if total_height <= max_height:
+            return size, lines, font
+    
+    # If we get here, use minimum size
+    try:
+        font = ImageFont.truetype("arial.ttf", min_size)
+    except:
+        font = ImageFont.load_default()
+    
+    return min_size, [text], font
 
-
-# --- 2. CORE HELPER FUNCTIONS ---
-
-def hex_to_rgba(hex_color, alpha=255):
-    """Convert hex color to RGBA tuple."""
-    if hex_color.startswith('#'): hex_color = hex_color[1:]
-    r = int(hex_color[0:2], 16)
-    g = int(hex_color[2:4], 16)
-    b = int(hex_color[4:6], 16)
-    return (r, g, b, alpha)
-
-def hex_to_rgb(hex_color):
-    """Convert hex color to RGB tuple."""
-    if hex_color.startswith('#'): hex_color = hex_color[1:]
-    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-
-def get_text_size(font, text):
-    if not text: return 0, 0
-    bbox = font.getbbox(text)
-    return bbox[2] - bbox[0], bbox[3] - bbox[1]
-
-def smart_wrap_text(text: str, font, max_width: int) -> list:
-    words = text.split()
-    if not words: return [""]
-    lines, current_line = [], words[0]
-    for word in words[1:]:
-        if get_text_size(font, current_line + " " + word)[0] <= max_width:
-            current_line += " " + word
-        else:
-            lines.append(current_line)
-            current_line = word
-    lines.append(current_line)
-    return lines
-
-@st.cache_data
-def create_gradient(w, h, c1_hex, c2_hex, direction="Vertical"):
-    """Create RGBA gradient."""
-    img = Image.new("RGBA", (w, h))
+# ============================================================================
+# BACKGROUND GENERATORS
+# ============================================================================
+def create_background(width, height, style, colors, time_offset=0):
+    """Create different background styles."""
+    img = Image.new("RGBA", (width, height))
     draw = ImageDraw.Draw(img)
-    c1_rgb = hex_to_rgb(c1_hex)
-    c2_rgb = hex_to_rgb(c2_hex)
-
-    if direction == "Vertical":
-        for y in range(h):
-            ratio = y / h
-            rgb = tuple(int((1-ratio)*c1_rgb[i] + ratio*c2_rgb[i]) for i in range(3))
-            draw.line([(0, y), (w, y)], fill=(*rgb, 255))
-    elif direction == "Horizontal":
-        for x in range(w):
-            ratio = x / w
-            rgb = tuple(int((1-ratio)*c1_rgb[i] + ratio*c2_rgb[i]) for i in range(3))
-            draw.line([(x, 0), (x, h)], fill=(*rgb, 255))
-    elif direction == "Diagonal":
-        max_dist = math.sqrt(w**2 + h**2)
-        for x in range(w):
-            for y in range(h):
-                dist = math.sqrt(x**2 + y**2)
-                ratio = dist / max_dist
-                rgb = tuple(int((1-ratio)*c1_rgb[i] + ratio*c2_rgb[i]) for i in range(3))
-                draw.point((x, y), fill=(*rgb, 255))
-
+    
+    color1, color2 = colors["bg"]
+    
+    if style == "Gradient":
+        # Simple gradient
+        for y in range(height):
+            ratio = y / height
+            r = int((1-ratio) * color1[0] + ratio * color2[0])
+            g = int((1-ratio) * color1[1] + ratio * color2[1])
+            b = int((1-ratio) * color1[2] + ratio * color2[2])
+            a = int((1-ratio) * color1[3] + ratio * color2[3])
+            draw.line([(0, y), (width, y)], fill=(r, g, b, a))
+    
+    elif style == "Abstract":
+        # Abstract moving shapes
+        for i in range(5):
+            offset = int(time_offset * 100) % 1000
+            size = 100 + int(50 * math.sin(time_offset + i))
+            x = int(width * (0.2 * i) + offset % 300)
+            y = int(height * 0.5 + 100 * math.cos(time_offset + i))
+            
+            # Draw abstract shape
+            draw.ellipse([x, y, x+size, y+size], 
+                        outline=colors["accent"], 
+                        width=3)
+            
+            # Smaller inner shape
+            draw.ellipse([x+20, y+20, x+size-20, y+size-20], 
+                        outline=colors["accent"], 
+                        width=2)
+    
+    elif style == "Particles":
+        # Particle effect
+        for i in range(50):
+            x = int(width * (0.5 + 0.4 * math.sin(time_offset + i * 0.2)))
+            y = int(height * (0.5 + 0.4 * math.cos(time_offset + i * 0.3)))
+            size = 2 + int(3 * math.sin(time_offset + i * 0.5))
+            
+            # Random opacity
+            opacity = int(150 + 100 * math.sin(time_offset + i))
+            particle_color = colors["accent"][:3] + (opacity,)
+            
+            draw.ellipse([x-size, y-size, x+size, y+size], 
+                        fill=particle_color)
+    
+    elif style == "Geometric":
+        # Geometric patterns
+        for i in range(10):
+            x = int(width * (0.1 + 0.08 * i) + time_offset * 10 % 200)
+            y = int(height * 0.3 + 50 * math.sin(time_offset + i))
+            
+            # Draw geometric shape
+            points = []
+            for j in range(6):
+                angle = 2 * math.pi * j / 6 + time_offset
+                px = x + 40 * math.cos(angle)
+                py = y + 40 * math.sin(angle)
+                points.append((px, py))
+            
+            if len(points) > 2:
+                draw.polygon(points, outline=colors["accent"], width=2)
+    
     return img
 
-def draw_rounded_rect(draw, xy, radius=40, fill=None):
-    """Draws a rounded rectangle using PIL shapes."""
-    x1, y1, x2, y2 = [int(v) for v in xy]
-    radius = min(radius, (x2 - x1) // 2, (y2 - y1) // 2)
-    draw.pieslice([x1, y1, x1+2*radius, y1+2*radius], 180, 270, fill=fill)
-    draw.pieslice([x2-2*radius, y1, x2, y1+2*radius], 270, 360, fill=fill)
-    draw.pieslice([x2-2*radius, y2-2*radius, x2, y2], 0, 90, fill=fill)
-    draw.pieslice([x1, y2-2*radius, x1+2*radius, y2], 90, 180, fill=fill)
-    draw.rectangle([x1+radius, y1, x2-radius, y2], fill=fill)
-    draw.rectangle([x1, y1+radius, x1+radius, y2-radius], fill=fill)
-    draw.rectangle([x2-radius, y1+radius, x2, y2-radius], fill=fill)
-    draw.rectangle([x1, y2-radius, x2, y2], fill=fill)
-
-@st.cache_data(ttl=3600)
-def download_font(font_name):
-    path = f"{font_name}.ttf"
-    if not os.path.exists(path):
-        if font_name == "Poppins-Bold":
-            url = "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-Bold.ttf" 
-        elif font_name == "Roboto-Regular":
-            url = "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-Regular.ttf"
-        else:
-            return None 
-        try:
-            r = requests.get(url, timeout=10)
-            r.raise_for_status()
-            with open(path, "wb") as f: f.write(r.content)
-        except Exception as e:
-            st.error(f"Failed to download font '{font_name}' from raw link. Error: {e}") 
-            return None
-    return path
-
-def safe_load_font(font_path, size):
-    """Safe font loading with fallbacks."""
-    try:
-        if font_path and os.path.exists(font_path):
-            return ImageFont.truetype(font_path, size)
-        # Fallback to common system font
-        return ImageFont.truetype("DejaVuSans.ttf", size)
-    except Exception:
-        # Last resort tiny bitmap
-        return ImageFont.load_default()
-
-FONT_PATH_BOLD = download_font("Poppins-Bold")
-FONT_PATH_REGULAR = download_font("Roboto-Regular")
-
-# Default font sizes - will be overridden by sliders
-HOOK_FONT_SIZE = 70 
-VERSE_FONT_SIZE = 150 
-REF_FONT_SIZE = 40 
-
-# Initialize fonts with default sizes
-HOOK_FONT = safe_load_font(FONT_PATH_BOLD, HOOK_FONT_SIZE)
-VERSE_FONT = safe_load_font(FONT_PATH_REGULAR, VERSE_FONT_SIZE)
-REF_FONT = safe_load_font(FONT_PATH_REGULAR, REF_FONT_SIZE)
-
-@st.cache_data(ttl=1800)
-def fetch_verse(book_name: str, chapter: int, verse_num: int) -> str:
-    book_lower = book_name.lower().replace('psalm', 'ps')
-    url = f"https://cdn.jsdelivr.net/gh/wldeh/bible-api/bibles/en-asv/books/{book_lower}/chapters/{chapter}/verses/{verse_num}.json"
-    try:
-        r = requests.get(url, timeout=5)
-        r.raise_for_status()
-        return r.json().get("text", "").strip() or DEFAULT_VERSE_TEXT
-    except: 
-        return DEFAULT_VERSE_TEXT
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def cache_media(url: str, file_ext: str) -> str:
-    if not url: return None
-    temp_path = f"cached_media_{hash(url)}.{file_ext}"
-    if os.path.exists(temp_path): return temp_path
-
-    try:
-        with requests.get(url, stream=True, timeout=30) as r:
-            r.raise_for_status()
-            with open(temp_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
-        return temp_path
-    except Exception as e:
-        st.error(f"Failed to cache media from URL: {url}. Error: {e}")
-        return None
-
-@st.cache_data(ttl=3600)
-def download_logo(logo_url):
-    try:
-        response = requests.get(logo_url, stream=True, timeout=10)
-        response.raise_for_status()
-        return Image.open(io.BytesIO(response.content)).convert("RGBA")
-    except Exception: return None
-
-# --- 3. SESSION STATE INITIALIZATION ---
-def initialize_session_state():
-    default_quality = list(VIDEO_QUALITIES.keys())[0] 
-    defaults = {
-        'aspect_ratio_name': list(ASPECT_RATIOS.keys())[0],
-        'color_theme': PALETTE_NAMES[0],
-        'bg_anim': BG_ANIMATIONS[1],
-        'txt_anim': TEXT_ANIMATIONS[1],
-        'quality_name': default_quality,
-        'book': "Psalm",
-        'chapter': 46,
-        'verse_num': 1,
-        'hook': "Need strength today?",
-        'audio_track': list(MEDIA_CONFIG["audio"].keys())[0],
-        'video_bg_selection': list(MEDIA_CONFIG["video_bg"].keys())[0],
-        'logo_placement': list(LOGO_PLACEMENTS.keys())[0],
-        'gradient_direction': GRADIENT_DIRECTIONS[0],
-        # NEW: Font size sliders
-        'hook_font_size': 70,
-        'verse_font_size': 150,
-        'ref_font_size': 40
-    }
-    for key, default_value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = default_value
-
-initialize_session_state()
-
-# --- 4. CORE DRAWING LOGIC ---
-def generate_text_overlay(aspect_ratio_name, palette_name, book, chapter, verse_num, hook, bg_anim, txt_anim, logo_placement, gradient_direction, animation_phase=None):
-    """Generates the transparent RGBA overlay and the composed PIL Image preview."""
-
-    global W, H, HOOK_FONT, VERSE_FONT, REF_FONT
+# ============================================================================
+# TEXT ANIMATION FUNCTIONS
+# ============================================================================
+def draw_typewriter_text(draw, text_lines, font, x, y, line_height, progress, colors):
+    """Draw text with typewriter animation."""
+    # Calculate total characters
+    full_text = " ".join(text_lines)
+    total_chars = len(full_text)
+    visible_chars = int(total_chars * progress)
     
-    # Update fonts with current sizes from session state
-    HOOK_FONT = safe_load_font(FONT_PATH_BOLD, st.session_state.hook_font_size)
-    VERSE_FONT = safe_load_font(FONT_PATH_REGULAR, st.session_state.verse_font_size)
-    REF_FONT = safe_load_font(FONT_PATH_REGULAR, st.session_state.ref_font_size)
+    # Build visible text
+    visible_text = full_text[:visible_chars]
     
-    W, H = ASPECT_RATIOS[aspect_ratio_name]
-    final_ref = f"{book} {chapter}:{verse_num} (ASV)"
-    verse_text_raw = fetch_verse(book, chapter, verse_num)
-    pal = DESIGN_CONFIG["palettes"][palette_name]
-
-    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0)) 
-    draw = ImageDraw.Draw(overlay)
-
-    phase = (animation_phase / (2 * math.pi)) % 1 if animation_phase is not None else 0
-
-    # --- Dynamic Layout Calculation ---
-    max_text_width_pixels = W - 2 * MARGIN - 100
-
-    hook_lines = smart_wrap_text(hook, HOOK_FONT, max_text_width_pixels)
-    verse_lines = smart_wrap_text(verse_text_raw, VERSE_FONT, max_text_width_pixels) 
-    ref_lines = smart_wrap_text(final_ref, REF_FONT, max_text_width_pixels)
-
-    line_h_hook = (HOOK_FONT.getbbox("A")[3] + 10) * 1
-    line_h_verse = (VERSE_FONT.getbbox("A")[3] + 8) * 1
-    line_h_ref = (REF_FONT.getbbox("A")[3] + 6) * 1
-
-    content_height = (len(hook_lines) * line_h_hook) + (len(verse_lines) * line_h_verse) + (len(ref_lines) * line_h_ref) + 120
-
-    padding = 50
-    box_w = W - 2 * MARGIN
-    box_h = content_height + 2 * padding
-
-    max_allowable_h = H * 0.8
-    if box_h > max_allowable_h: box_h = int(max_allowable_h)
-
-    box_x = MARGIN
-    box_center_y = int(H * 0.45)
-    box_y = box_center_y - (box_h // 2)
-    box_xy = (box_x, box_y, box_x + box_w, box_y + box_h)
-
-    current_y = box_y + (box_h - content_height) // 2
-
-    # Text Box Drawing - Using RGBA
-    box_color = (0, 0, 0, 180) if "Dark" in palette_name else (255, 255, 255, 200)
-    draw_rounded_rect(draw, box_xy, radius=40, fill=box_color)
-
-    # --- Text Drawing Logic ---
-    hook_color = hex_to_rgba(pal["accent"], 255)
-    verse_fill = (255, 255, 255, 255) 
-
-    # Draw Hook Text
-    for line in hook_lines:
-        w, h = get_text_size(HOOK_FONT, line)
-        draw.text(((W - w)//2, current_y), line, font=HOOK_FONT, fill=hook_color)
-        current_y += line_h_hook
-
-    current_y += 60 
-
-    # --- Verse Text Drawing with Premium Animations ---
-    if txt_anim == "Typewriter Effect":
-        full_text = " ".join(verse_lines)
-        total_chars = len(full_text)
-        chars_visible = int(total_chars * min(1.0, phase / 0.9))
-
-        temp_lines = []
-        words = full_text.split()
-        current_line_anim = ""
-        char_count = 0
-
-        for word in words:
-            test_line = (current_line_anim + " " + word).strip()
-
-            if char_count + len(word) > chars_visible and char_count < chars_visible:
-                remaining_chars = chars_visible - char_count
-                if remaining_chars > 0:
-                    current_line_anim = test_line[:remaining_chars].strip()
-                if current_line_anim: temp_lines.append(current_line_anim)
-                break
-
-            if get_text_size(VERSE_FONT, test_line)[0] <= max_text_width_pixels:
-                current_line_anim = test_line
-                char_count += len(word) + (1 if current_line_anim else 0)
-            else:
-                temp_lines.append(current_line_anim)
-                current_line_anim = word
-                char_count += len(word)
+    # Split into visible lines
+    words = visible_text.split()
+    visible_lines = []
+    current_line = ""
+    
+    for word in words:
+        test_line = f"{current_line} {word}".strip()
+        bbox = font.getbbox(test_line)
+        if bbox[2] - bbox[0] <= 900:  # Max width
+            current_line = test_line
         else:
-            if current_line_anim: temp_lines.append(current_line_anim)
+            if current_line:
+                visible_lines.append(current_line)
+            current_line = word
+    
+    if current_line:
+        visible_lines.append(current_line)
+    
+    # Draw visible lines
+    current_y = y
+    for line in visible_lines:
+        bbox = font.getbbox(line)
+        line_width = bbox[2] - bbox[0]
+        draw.text(((1080 - line_width) // 2, current_y), 
+                 line, font=font, fill=colors["text"])
+        current_y += line_height
+    
+    # Draw cursor
+    if progress < 1.0:
+        if visible_lines:
+            last_line = visible_lines[-1]
+            bbox = font.getbbox(last_line)
+            cursor_x = (1080 - bbox[2]) // 2 + bbox[2] + 5
+            cursor_y = current_y - line_height + 10
+            draw.line([(cursor_x, cursor_y), (cursor_x, cursor_y + line_height - 20)], 
+                     fill=colors["accent"], width=3)
+    
+    return current_y
 
-        y_anim = current_y
-        for line in temp_lines:
-            w, h = get_text_size(VERSE_FONT, line)
-            draw.text(((W - w)//2, y_anim), line, font=VERSE_FONT, fill=verse_fill)
-            y_anim += line_h_verse
+def draw_fade_text(draw, text_lines, font, x, y, line_height, progress, colors):
+    """Draw text with fade-in animation."""
+    opacity = int(255 * progress)
+    text_color = colors["text"][:3] + (opacity,)
+    
+    current_y = y
+    for line in text_lines:
+        bbox = font.getbbox(line)
+        line_width = bbox[2] - bbox[0]
+        draw.text(((1080 - line_width) // 2, current_y), 
+                 line, font=font, fill=text_color)
+        current_y += line_height
+    
+    return current_y
 
-        if phase > 0.05 and int(phase * 10) % 2 == 0:
-            last_line = temp_lines[-1] if temp_lines else ""
-            cursor_x = (W - get_text_size(VERSE_FONT, last_line)[0]) // 2 + get_text_size(VERSE_FONT, last_line)[0] + 5
-            draw.line([(cursor_x, y_anim - line_h_verse + 5), (cursor_x, y_anim - 15)], fill=verse_fill, width=5)
-
-    elif txt_anim == "Fade-in Opacity":
-        opacity = int(50 + 205 * min(1.0, phase / 0.5))
-        fade_fill = (255, 255, 255, opacity)
-        y_anim = current_y
+# ============================================================================
+# IMAGE GENERATION
+# ============================================================================
+def create_image(size_name, color_name, book, chapter, verse, hook, animation_type, bg_style):
+    """Create the verse image with smart layout."""
+    width, height = SIZES[size_name]
+    colors = COLORS[color_name]
+    
+    # Background
+    image = create_background(width, height, bg_style, colors)
+    draw = ImageDraw.Draw(image)
+    
+    # Text content
+    verse_text = get_verse(book, chapter, verse)
+    reference = f"{book} {chapter}:{verse}"
+    
+    # Calculate text box dimensions
+    text_box_width = 900
+    text_box_x = (width - text_box_width) // 2
+    
+    # Smart font sizing for verse
+    verse_size, verse_lines, verse_font = calculate_font_size(
+        verse_text, 
+        target_size=130, 
+        min_size=60,
+        max_width=text_box_width - 40,
+        max_height=height * 0.5
+    )
+    
+    # Other fonts
+    hook_font = ImageFont.truetype("arial.ttf", 70) if os.path.exists("arial.ttf") else ImageFont.load_default()
+    ref_font = ImageFont.truetype("arial.ttf", 40) if os.path.exists("arial.ttf") else ImageFont.load_default()
+    
+    # Calculate verse box height
+    verse_line_height = verse_font.getbbox("A")[3] - verse_font.getbbox("A")[1]
+    verse_height = len(verse_lines) * verse_line_height * 1.2
+    
+    # Calculate total box dimensions
+    box_padding = 60
+    box_height = verse_height + (box_padding * 2)
+    box_y = (height - box_height) // 2
+    
+    # Draw semi-transparent background box
+    box_color = (0, 0, 0, 180)  # Semi-transparent black
+    draw.rectangle([text_box_x, box_y, text_box_x + text_box_width, box_y + box_height], 
+                  fill=box_color)
+    
+    # Draw hook ABOVE the box (not inside)
+    if hook:
+        bbox = hook_font.getbbox(hook)
+        hook_width = bbox[2] - bbox[0]
+        hook_x = (width - hook_width) // 2
+        hook_y = box_y - 80  # Position above the box
+        
+        # Add a subtle background for hook
+        draw.rectangle([hook_x - 20, hook_y - 10, hook_x + hook_width + 20, hook_y + bbox[3] + 10], 
+                      fill=colors["accent"])
+        
+        draw.text((hook_x, hook_y), hook, font=hook_font, fill=colors["text"])
+    
+    # Draw verse inside box
+    verse_y = box_y + box_padding
+    
+    if animation_type == "Typewriter":
+        verse_y = draw_typewriter_text(draw, verse_lines, verse_font, 
+                                      text_box_x, verse_y, verse_line_height * 1.2, 
+                                      1.0, colors)
+    elif animation_type == "Fade":
+        verse_y = draw_fade_text(draw, verse_lines, verse_font, 
+                                text_box_x, verse_y, verse_line_height * 1.2, 
+                                1.0, colors)
+    else:
+        # Normal text
+        current_y = verse_y
         for line in verse_lines:
-            w, h = get_text_size(VERSE_FONT, line)
-            draw.text(((W - w)//2, y_anim), line, font=VERSE_FONT, fill=fade_fill)
-            y_anim += line_h_verse
+            bbox = verse_font.getbbox(line)
+            line_width = bbox[2] - bbox[0]
+            draw.text(((width - line_width) // 2, current_y), 
+                     line, font=verse_font, fill=colors["text"])
+            current_y += verse_line_height * 1.2
+        verse_y = current_y
+    
+    # Draw reference BELOW the box (bottom right corner)
+    bbox = ref_font.getbbox(reference)
+    ref_width = bbox[2] - bbox[0]
+    ref_x = text_box_x + text_box_width - ref_width - 20  # Right aligned
+    ref_y = box_y + box_height + 40  # Position below the box
+    
+    # Add subtle background for reference
+    draw.rectangle([ref_x - 10, ref_y - 5, ref_x + ref_width + 10, ref_y + bbox[3] + 5], 
+                  fill=colors["accent"])
+    
+    draw.text((ref_x, ref_y), reference, font=ref_font, fill=colors["text"])
+    
+    # Add "Still Mind" brand (top left)
+    brand_font = ImageFont.truetype("arial.ttf", 60) if os.path.exists("arial.ttf") else ImageFont.load_default()
+    draw.text((50, 50), "Still Mind", font=brand_font, fill=(76, 175, 80, 255))
+    
+    return image, verse_text
 
-    else: 
-        y_anim = current_y
-        for line in verse_lines:
-            w, h = get_text_size(VERSE_FONT, line)
-            draw.text(((W - w)//2, y_anim), line, font=VERSE_FONT, fill=verse_fill)
-            y_anim += line_h_verse
-
-    current_y = y_anim 
-
-    current_y += 60
-    ref_color = hex_to_rgba(pal["text_secondary"], 255)
-    w, h = get_text_size(REF_FONT, final_ref)
-    draw.text(((W - w)//2, current_y), final_ref, font=REF_FONT, fill=ref_color)
-
-    # --- Logo Placement ---
-    if logo_placement != "Hidden":
-        logo_img = download_logo(LOGO_URL)
-        if logo_img:
-            logo_w, logo_h = LOGO_SIZE, LOGO_SIZE
-            logo_img = logo_img.resize((logo_w, logo_h))
-
-            h_norm, v_norm = LOGO_PLACEMENTS[logo_placement]
-
-            logo_x = int(50 + h_norm * (W - logo_w - 100))
-            logo_y = int(50 + v_norm * (H - logo_h - 100))
-
-            draw.ellipse([logo_x - 10, logo_y - 10, logo_x + logo_w + 10, logo_y + logo_h + 10], fill=(255, 255, 255, 50)) 
-
-            overlay.paste(logo_img, (logo_x, logo_y), logo_img)
-
-    # --- Return Values ---
-    preview_bg = create_gradient(W, H, pal["bg"][0], pal["bg"][1], direction=gradient_direction)
-    preview_bg.paste(overlay, (0, 0), overlay) 
-
-    return preview_bg, overlay, verse_text_raw, final_ref
-
-# --- 5. VIDEO GENERATION LOGIC (FIXED RGBA ISSUE) ---
-def generate_mp4(aspect_ratio_name, palette_name, book, chapter, verse_num, hook, bg_anim, txt_anim, quality_name, audio_url, video_bg_url, logo_placement, gradient_direction):
-
-    duration, fps = VIDEO_QUALITIES[quality_name]
-    W_clip, H_clip = ASPECT_RATIOS[aspect_ratio_name]
-
-    progress_container = st.container()
-    progress_bar = progress_container.progress(0, text="Initializing...")
-
-    # 1. Media Caching
-    progress_bar.progress(10, text="Caching external media...")
-    audio_path = cache_media(audio_url, 'mp4') if audio_url else None
-    video_path = cache_media(video_bg_url, 'mp4') if video_bg_url else None
-
-    # 2. Base Clip Creation
-    base_clip = None
-
-    if video_path:
-        try:
-            progress_bar.progress(30, text="Composing video background...")
-            base_clip = VideoFileClip(video_path)
-            base_clip = base_clip.fx(vfx.resize, newsize=(W_clip, H_clip)).subclip(0, duration)
-            if base_clip.duration < duration:
-                 base_clip = base_clip.loop(duration=duration)
-        except Exception as e:
-            st.warning(f"Failed to process video background. Using animated gradient. Error: {e}")
-            base_clip = None
-
-    if base_clip is None:
-        progress_bar.progress(30, text="Generating premium animated gradient...")
-        pal = DESIGN_CONFIG["palettes"][palette_name]
-
-        def make_gradient_frame(t):
-            # Create base gradient image
-            base_img = create_gradient(W_clip, H_clip, pal["bg"][0], pal["bg"][1], direction=gradient_direction)
+# ============================================================================
+# VIDEO GENERATION
+# ============================================================================
+def create_video(size_name, color_name, book, chapter, verse, hook, animation_type, bg_style):
+    """Create animated video."""
+    width, height = SIZES[size_name]
+    colors = COLORS[color_name]
+    duration = 6
+    fps = 12
+    
+    # Get verse text
+    verse_text = get_verse(book, chapter, verse)
+    reference = f"{book} {chapter}:{verse}"
+    
+    # Calculate smart font size for video
+    text_box_width = 900
+    verse_size, verse_lines, verse_font = calculate_font_size(
+        verse_text, 
+        target_size=130, 
+        min_size=60,
+        max_width=text_box_width - 40,
+        max_height=height * 0.5
+    )
+    
+    # Video frame generator
+    def make_frame(t):
+        # Create animated background
+        img = create_background(width, height, bg_style, colors, t)
+        draw = ImageDraw.Draw(img)
+        
+        # Calculate text box
+        text_box_x = (width - text_box_width) // 2
+        verse_line_height = verse_font.getbbox("A")[3] - verse_font.getbbox("A")[1]
+        verse_height = len(verse_lines) * verse_line_height * 1.2
+        
+        box_padding = 60
+        box_height = verse_height + (box_padding * 2)
+        box_y = (height - box_height) // 2
+        
+        # Draw semi-transparent box
+        box_color = (0, 0, 0, 180)
+        draw.rectangle([text_box_x, box_y, text_box_x + text_box_width, box_y + box_height], 
+                      fill=box_color)
+        
+        # Draw hook above box
+        if hook:
+            hook_font = ImageFont.truetype("arial.ttf", 70) if os.path.exists("arial.ttf") else ImageFont.load_default()
+            bbox = hook_font.getbbox(hook)
+            hook_width = bbox[2] - bbox[0]
+            hook_x = (width - hook_width) // 2
+            hook_y = box_y - 80
             
-            # Convert PIL Image to RGB numpy array for MoviePy
-            return np.array(base_img.convert('RGB'))
-
-        base_clip = VideoClip(make_gradient_frame, duration=duration).set_fps(fps)
-
-    # 3. Animated Overlay Clip - FIXED RGBA ISSUE
-    progress_bar.progress(50, text="Creating animated text overlay...")
+            draw.rectangle([hook_x - 20, hook_y - 10, hook_x + hook_width + 20, hook_y + bbox[3] + 10], 
+                          fill=colors["accent"])
+            draw.text((hook_x, hook_y), hook, font=hook_font, fill=colors["text"])
+        
+        # Draw verse with animation
+        verse_y = box_y + box_padding
+        
+        if animation_type == "Typewriter":
+            progress = min(1.0, t / (duration * 0.8))  # Typewriter completes at 80% of video
+            verse_y = draw_typewriter_text(draw, verse_lines, verse_font, 
+                                          text_box_x, verse_y, verse_line_height * 1.2, 
+                                          progress, colors)
+        
+        elif animation_type == "Fade":
+            progress = min(1.0, t / (duration * 0.5))  # Fade completes at 50% of video
+            verse_y = draw_fade_text(draw, verse_lines, verse_font, 
+                                    text_box_x, verse_y, verse_line_height * 1.2, 
+                                    progress, colors)
+        
+        else:
+            # Static text
+            current_y = verse_y
+            for line in verse_lines:
+                bbox = verse_font.getbbox(line)
+                line_width = bbox[2] - bbox[0]
+                draw.text(((width - line_width) // 2, current_y), 
+                         line, font=verse_font, fill=colors["text"])
+                current_y += verse_line_height * 1.2
+            verse_y = current_y
+        
+        # Draw reference below box
+        ref_font = ImageFont.truetype("arial.ttf", 40) if os.path.exists("arial.ttf") else ImageFont.load_default()
+        bbox = ref_font.getbbox(reference)
+        ref_width = bbox[2] - bbox[0]
+        ref_x = text_box_x + text_box_width - ref_width - 20
+        ref_y = box_y + box_height + 40
+        
+        # Fade in reference
+        ref_opacity = int(255 * min(1.0, (t - duration * 0.7) / 0.3))
+        if ref_opacity > 0:
+            ref_color = colors["accent"][:3] + (ref_opacity,)
+            text_color = colors["text"][:3] + (ref_opacity,)
+            
+            draw.rectangle([ref_x - 10, ref_y - 5, ref_x + ref_width + 10, ref_y + bbox[3] + 5], 
+                          fill=ref_color)
+            draw.text((ref_x, ref_y), reference, font=ref_font, fill=text_color)
+        
+        # Convert to RGB for video
+        return np.array(img.convert("RGB"))
     
-    def make_overlay_frame(t):
-        """Create overlay frame and properly handle RGBA -> RGB conversion."""
-        # Get the RGBA overlay
-        _, overlay_pil, _, _ = generate_text_overlay(
-            aspect_ratio_name, palette_name, book, chapter, verse_num, hook, 
-            bg_anim, txt_anim, logo_placement, gradient_direction, animation_phase=t
-        )
-        
-        # Convert PIL Image to numpy array
-        overlay_array = np.array(overlay_pil)
-        
-        # Extract RGB and Alpha channels
-        rgb = overlay_array[..., :3]  # First 3 channels: R, G, B
-        alpha = overlay_array[..., 3]  # 4th channel: Alpha
-        
-        # Create white background for compositing
-        background = np.ones_like(rgb) * 255
-        
-        # Normalize alpha to 0-1 range
-        alpha_normalized = alpha[:, :, np.newaxis] / 255.0
-        
-        # Composite: result = alpha * rgb + (1 - alpha) * background
-        result = (alpha_normalized * rgb + (1 - alpha_normalized) * background).astype(np.uint8)
-        
-        return result
+    # Create and save video
+    video = VideoClip(make_frame, duration=duration)
+    video = video.set_fps(fps)
+    
+    temp_file = f"video_{int(time.time())}.mp4"
+    video.write_videofile(temp_file, fps=fps, codec="libx264", verbose=False, logger=None)
+    
+    with open(temp_file, "rb") as f:
+        video_bytes = f.read()
+    
+    os.remove(temp_file)
+    return video_bytes
 
-    overlay_clip = VideoClip(make_overlay_frame, duration=duration).set_fps(fps)
-
-    # 4. Composition
-    final_clip = CompositeVideoClip([base_clip, overlay_clip])
-    final_clip = final_clip.set_duration(duration).set_fps(fps)
-
-    # 5. Audio Integration 
-    if audio_path:
-        try:
-            progress_bar.progress(70, text="Adding and clipping audio...")
-            audio_clip = AudioFileClip(audio_path) 
-            audio_clip = audio_clip.subclip(0, duration)
-            final_clip = final_clip.set_audio(audio_clip)
-        except Exception as e:
-            st.warning(f"Could not process audio file. Generating video without music. Error: {e}")
-
-    # 6. Final Write
-    temp_filename = f"final_video_{time.time()}.mp4"
-
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+def get_verse(book, chapter, verse):
+    """Get verse text from API."""
     try:
-        progress_bar.progress(85, text="Rendering final MP4 file (This might take time)...")
-        final_clip.write_videofile(
-            temp_filename, 
-            fps=fps, 
-            codec='libx264', 
-            audio=(audio_path is not None), 
-            verbose=False, 
-            logger=None
-        )
+        url = f"https://bible-api.com/{book}+{chapter}:{verse}"
+        response = requests.get(url, timeout=3)
+        data = response.json()
+        return data.get("text", "God is our refuge and strength.").replace("\n", " ")
+    except:
+        return "God is our refuge and strength, an ever-present help in trouble."
 
-        progress_bar.progress(100, text="Render complete! ✨")
-        time.sleep(1) 
-        progress_container.empty()
+# ============================================================================
+# STREAMLIT UI
+# ============================================================================
+st.title("🧠 Still Mind - Verse Studio")
 
-        with open(temp_filename, "rb") as f: video_bytes = f.read()
-        os.remove(temp_filename)
-        return video_bytes
+# Sidebar
+with st.sidebar:
+    st.header("🎨 Design")
+    size = st.selectbox("Size", list(SIZES.keys()))
+    color = st.selectbox("Colors", list(COLORS.keys()))
+    bg_style = st.selectbox("Background", BACKGROUNDS)
+    
+    st.header("📖 Content")
+    book = st.selectbox("Book", BIBLE_BOOKS)
+    col1, col2 = st.columns(2)
+    with col1:
+        chapter = st.number_input("Chapter", 1, 150, 46)
+    with col2:
+        verse_num = st.number_input("Verse", 1, 176, 1)
+    
+    hook = st.text_input("Hook", "Find peace in His presence")
+    
+    st.header("🎬 Animation")
+    animation_type = st.selectbox("Text Animation", ["None", "Typewriter", "Fade"])
 
-    except Exception as e:
-        progress_container.empty()
-        st.error(f"Video generation failed during final write. Check FFmpeg/dependency setup. Error: {e}")
-        return None
-
-# --- 6. STREAMLIT UI ---
-st.title("💎 Verse Studio Premium")
-
-col1, col2 = st.columns([1, 1.5])
+# Main area
+col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.subheader("🎨 Design & Animation")
-
-    st.selectbox("🎥 Aspect Ratio", list(ASPECT_RATIOS.keys()), key='aspect_ratio_name')
-    st.selectbox("Color Theme", PALETTE_NAMES, key='color_theme')
-    st.selectbox("Gradient Direction", GRADIENT_DIRECTIONS, key='gradient_direction')
+    # Generate preview
+    image, verse_text = create_image(size, color, book, chapter, verse_num, hook, animation_type, bg_style)
+    st.image(image, use_column_width=True)
     
-    # NEW: Text Size Sliders
-    st.markdown("---")
-    st.subheader("📝 Text Sizes")
-    st.slider("Hook Font Size", 40, 120, st.session_state.hook_font_size, key='hook_font_size')
-    st.slider("Verse Font Size", 80, 200, st.session_state.verse_font_size, key='verse_font_size')
-    st.slider("Reference Font Size", 20, 80, st.session_state.ref_font_size, key='ref_font_size')
+    # Download buttons
+    col_a, col_b = st.columns(2)
     
-    st.markdown("---")
-    st.selectbox("Audio Track", list(MEDIA_CONFIG["audio"].keys()), key='audio_track')
-    st.selectbox("Video BG", list(MEDIA_CONFIG["video_bg"].keys()), key='video_bg_selection')
-
-    is_media_bg_selected = st.session_state.video_bg_selection != "None (Use Animated/Image)"
-
-    if not is_media_bg_selected:
-        st.selectbox("Drawn Animated BG Style", BG_ANIMATIONS, index=1, key='bg_anim')
-    else:
-        st.session_state.bg_anim = "None"
-        st.caption("Video background selected. Drawn Animated BG is disabled.")
-
-    st.selectbox("Logo Placement", list(LOGO_PLACEMENTS.keys()), key='logo_placement')
-    st.selectbox("Text Animation", TEXT_ANIMATIONS, key='txt_anim')
-    st.selectbox("Video Quality", list(VIDEO_QUALITIES.keys()), key='quality_name')
+    with col_a:
+        img_bytes = io.BytesIO()
+        image.save(img_bytes, format="PNG")
+        st.download_button(
+            "📥 Download PNG",
+            data=img_bytes.getvalue(),
+            file_name=f"verse_{book}_{chapter}_{verse_num}.png",
+            mime="image/png",
+            use_container_width=True
+        )
+    
+    with col_b:
+        if st.button("🎬 Create Video (6s)", use_container_width=True):
+            with st.spinner("Making video..."):
+                video_data = create_video(size, color, book, chapter, verse_num, hook, animation_type, bg_style)
+                
+                if video_data:
+                    st.video(video_data)
+                    
+                    st.download_button(
+                        "📥 Download MP4",
+                        data=video_data,
+                        file_name=f"verse_{book}_{chapter}_{verse_num}.mp4",
+                        mime="video/mp4",
+                        use_container_width=True
+                    )
 
 with col2:
-    st.subheader("📖 Verse Selection")
-    st.selectbox("Book", BOOK_NAMES, key='book')
-    available_chapters = list(BIBLE_STRUCTURE.get(st.session_state.book, {1: 31}).keys())
-    st.selectbox("Chapter", available_chapters, key='chapter')
-    max_verses_in_chapter = BIBLE_STRUCTURE.get(st.session_state.book, {}).get(st.session_state.chapter, 31)
-    available_verses = list(range(1, max_verses_in_chapter + 1))
-    st.selectbox("Verse", available_verses, key='verse_num')
-    st.text_input("Engagement Hook", value=st.session_state.hook, key='hook')
+    st.header("📱 Social Tools")
+    
+    reference = f"{book} {chapter}:{verse_num}"
+    
+    # Smart caption with hashtags based on book
+    hashtags = {
+        "Psalm": "#Psalms #Wisdom #Worship",
+        "Matthew": "#Gospel #Jesus #Teachings",
+        "John": "#Gospel #Love #EternalLife",
+        "Romans": "#Faith #Grace #Salvation",
+        "Ephesians": "#Church #Unity #Blessings",
+        "Philippians": "#Joy #Contentment #Hope",
+        "James": "#FaithWorks #Wisdom #PracticalFaith"
+    }
+    
+    caption = f"""{hook}
 
-st.markdown("---")
+"{verse_text[:150]}{'...' if len(verse_text) > 150 else ''}"
 
-# --- Poster Generation and Display ---
-pil_poster_img, _, verse_text, final_ref = generate_text_overlay(
-    st.session_state.aspect_ratio_name, 
-    st.session_state.color_theme, 
-    st.session_state.book, 
-    st.session_state.chapter, 
-    st.session_state.verse_num, 
-    st.session_state.hook, 
-    st.session_state.bg_anim, 
-    st.session_state.txt_anim,
-    st.session_state.logo_placement,
-    st.session_state.gradient_direction
-)
-st.image(pil_poster_img, caption=f"{st.session_state.color_theme} | {st.session_state.aspect_ratio_name} | Ref: {final_ref}", use_column_width=True)
+📖 {reference}
 
-st.write(f"**Fetched Verse:** {verse_text}")
-st.markdown("---")
+{hashtags.get(book, "#BibleVerse #Scripture")}
+#StillMind"""
+    
+    st.text_area("Social Caption", caption, height=200)
+    
+    if st.button("📋 Copy", use_container_width=True):
+        st.code(caption)
+        st.success("Ready to paste!")
+    
+    st.divider()
+    
+    # Info
+    st.caption(f"**Size:** {size}")
+    st.caption(f"**Colors:** {color}")
+    st.caption(f"**Background:** {bg_style}")
+    st.caption(f"**Animation:** {animation_type}")
+    st.caption(f"**Verse:** {reference}")
 
-# 1. Static PNG Download
-buf = io.BytesIO()
-pil_poster_img.save(buf, format="PNG") 
-st.download_button("⬇️ Download Static Poster PNG", data=buf.getvalue(), file_name=f"verse_{final_ref.replace(' ', '_').replace(':', '')}.png", mime="image/png")
+# Cleanup
+for file in os.listdir("."):
+    if file.startswith("video_") and file.endswith(".mp4"):
+        try:
+            if time.time() - os.path.getctime(file) > 300:
+                os.remove(file)
+        except:
+            pass
 
-# 2. Animated Video Feature (MP4)
-st.subheader("🎬 Animated Video")
-
-if st.button(f"✨ Generate {st.session_state.quality_name} Video"):
-    audio_url = MEDIA_CONFIG["audio"][st.session_state.audio_track]
-    video_bg_url = MEDIA_CONFIG["video_bg"][st.session_state.video_bg_selection]
-
-    video_bytes = generate_mp4(
-        st.session_state.aspect_ratio_name, 
-        st.session_state.color_theme, 
-        st.session_state.book, 
-        st.session_state.chapter, 
-        st.session_state.verse_num, 
-        st.session_state.hook, 
-        st.session_state.bg_anim, 
-        st.session_state.txt_anim, 
-        st.session_state.quality_name,
-        audio_url,
-        video_bg_url,
-        st.session_state.logo_placement,
-        st.session_state.gradient_direction
-    )
-
-    if video_bytes:
-        st.video(video_bytes, format="video/mp4")
-        st.download_button("⬇️ Download Animated MP4", data=video_bytes, file_name=f"verse_animated_{final_ref.replace(' ', '_').replace(':', '')}.mp4", mime="video/mp4")
-
-st.markdown("---")
-st.text_area("Copy Caption for Social Media", f"{st.session_state.hook} Read {final_ref} today. #dailyverse #faith", height=150)
-
-st.info("💡 Next Steps: Add user file uploads and subtle audio volume controls.")
-
-# --- Cleanup Button ---
-if st.button("🧹 Cleanup Cached Media and Temp Files"):
-    cleanup_temp_files()
-    st.success("Cleaned up temporary media files!")
+# Footer
+st.divider()
+st.caption("Still Mind Verse Studio | Smart Font Sizing | Working Animations | Abstract Backgrounds")
