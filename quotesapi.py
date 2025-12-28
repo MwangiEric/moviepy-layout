@@ -16,9 +16,9 @@ st.set_page_config(page_title="Wisdom Studio", page_icon="🧠", layout="wide")
 # ============================================================================
 # Get Groq API key from Streamlit secrets or environment
 try:
-    GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+    GROQ_API_KEY = st.secrets["groq_key"]
 except:
-    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+    GROQ_API_KEY = os.getenv("groq_key", "")
     if not GROQ_API_KEY:
         st.error("Please set GROQ_API_KEY in Streamlit secrets or environment")
         st.stop()
