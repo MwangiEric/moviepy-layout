@@ -1,8 +1,7 @@
 """
-STILL MIND - Production Social Media Quote Generator
-Version 3.0 | Production Ready
-Built for: Kenyan & Global Audience
-Optimized for: TikTok, Instagram Reels, YouTube Shorts
+STILL MIND - Complete Social Media Quote Generator
+Single File Production Version
+Optimized for Kenyan & Global Audience
 """
 
 import os
@@ -28,58 +27,57 @@ from groq import Groq
 import imageio.v3 as iio
 
 # ============================================
-# CONFIGURATION & CONSTANTS
+# CONFIGURATION
 # ============================================
-class Config:
-    """Production configuration management"""
-    
-    # Brand identity
-    BRAND_NAME = "Still Mind"
-    BRAND_TAGLINE = "Wisdom for the modern soul"
-    
-    # Color palette (RGB tuples)
-    COLORS = {
-        "deep_green": (27, 67, 50),
-        "dark_blue": (13, 27, 42),
-        "white": (255, 255, 255),
-        "light_grey": (224, 225, 221),
-        "accent_green": (45, 106, 79),
-        "accent_blue": (65, 90, 119),
-        "kenyan_flag_black": (0, 0, 0),
-        "kenyan_flag_red": (186, 12, 47),
-        "kenyan_flag_green": (0, 122, 51)
-    }
-    
-    # Image settings
-    IMAGE_SIZE = (1080, 1080)  # Instagram square
-    STORY_SIZE = (1080, 1920)  # Vertical stories
-    ANIMATION_FPS = 12
-    ANIMATION_DURATION = 6  # seconds
-    
-    # Cache settings
-    CACHE_TTL = 3600  # 1 hour
-    MAX_CACHE_SIZE = 100
-    
-    # API settings
-    QUOTABLE_URL = "https://api.quotable.io"
-    PEXELS_URL = "https://api.pexels.com/v1"
-    
-    # Font settings
-    FONT_PATHS = [
-        "fonts/arial.ttf",
-        "arial.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "/System/Library/Fonts/Helvetica.ttf",
-        "C:/Windows/Fonts/arial.ttf"
-    ]
+
+# Brand identity
+BRAND_NAME = "Still Mind"
+BRAND_TAGLINE = "Wisdom for the modern soul"
+
+# Color palette (RGB tuples)
+COLORS = {
+    "deep_green": (27, 67, 50),
+    "dark_blue": (13, 27, 42),
+    "white": (255, 255, 255),
+    "light_grey": (224, 225, 221),
+    "accent_green": (45, 106, 79),
+    "accent_blue": (65, 90, 119),
+    "kenyan_flag_black": (0, 0, 0),
+    "kenyan_flag_red": (186, 12, 47),
+    "kenyan_flag_green": (0, 122, 51)
+}
+
+# Image settings
+IMAGE_SIZE = (1080, 1080)  # Instagram square
+STORY_SIZE = (1080, 1920)  # Vertical stories
+ANIMATION_FPS = 12
+ANIMATION_DURATION = 6  # seconds
+
+# Cache settings
+CACHE_TTL = 3600  # 1 hour
+MAX_CACHE_SIZE = 100
+
+# API URLs
+QUOTABLE_URL = "https://api.quotable.io"
+PEXELS_URL = "https://api.pexels.com/v1"
+
+# Font paths
+FONT_PATHS = [
+    "fonts/arial.ttf",
+    "arial.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/System/Library/Fonts/Helvetica.ttf",
+    "C:/Windows/Fonts/arial.ttf"
+]
 
 # ============================================
 # CACHING SYSTEM
 # ============================================
-class ProductionCache:
+
+class SmartCache:
     """Advanced caching system with TTL and LRU eviction"""
     
-    def __init__(self, max_size: int = Config.MAX_CACHE_SIZE, ttl: int = Config.CACHE_TTL):
+    def __init__(self, max_size: int = MAX_CACHE_SIZE, ttl: int = CACHE_TTL):
         self.cache = OrderedDict()
         self.timestamps = {}
         self.max_size = max_size
@@ -133,7 +131,8 @@ class ProductionCache:
     
     def get_stats(self) -> Dict:
         """Get cache statistics"""
-        hit_rate = self.stats["hits"] / max(1, self.stats["hits"] + self.stats["misses"])
+        total = self.stats["hits"] + self.stats["misses"]
+        hit_rate = self.stats["hits"] / total if total > 0 else 0
         return {
             "size": len(self.cache),
             "hit_rate": f"{hit_rate:.1%}",
@@ -143,13 +142,14 @@ class ProductionCache:
         }
 
 # ============================================
-# ERROR HANDLING & LOGGING
+# LOGGING
 # ============================================
-class ProductionLogger:
-    """Structured logging for production"""
+
+class Logger:
+    """Structured logging"""
     
     @staticmethod
-    def log_event(event: str, data: Dict = None, level: str = "INFO"):
+    def log(event: str, data: Dict = None, level: str = "INFO"):
         """Log structured events"""
         log_entry = {
             "timestamp": datetime.datetime.now().isoformat(),
@@ -158,106 +158,132 @@ class ProductionLogger:
             "data": data or {}
         }
         
-        # In production, this would go to CloudWatch/ELK
-        # For Streamlit, we'll use st.log
         if st._is_running_with_streamlit:
             st.log(f"[{level}] {event}")
         
-        # Also print for local development
         print(json.dumps(log_entry))
     
     @staticmethod
-    def log_error(error: Exception, context: str = ""):
+    def error(error: Exception, context: str = ""):
         """Log errors with context"""
         error_data = {
             "error_type": type(error).__name__,
             "error_message": str(error),
-            "context": context,
-            "traceback": sys.exc_info()
+            "context": context
         }
-        ProductionLogger.log_event("ERROR", error_data, "ERROR")
+        Logger.log("ERROR", error_data, "ERROR")
+
+# ============================================
+# FONT MANAGER
+# ============================================
+
+class FontManager:
+    """Manages font loading and caching"""
+    
+    def __init__(self):
+        self.fonts = {}
+        self._load_fonts()
+    
+    def _load_fonts(self):
+        """Load all required fonts"""
+        font_found = False
+        
+        for font_path in FONT_PATHS:
+            try:
+                if Path(font_path).exists():
+                    self._load_font_from_path(font_path)
+                    font_found = True
+                    Logger.log("FONTS_LOADED", {"path": font_path})
+                    break
+            except Exception as e:
+                Logger.error(e, f"Failed to load font from {font_path}")
+                continue
+        
+        if not font_found:
+            Logger.log("USING_FALLBACK_FONTS")
+            self._create_fallback_fonts()
+    
+    def _load_font_from_path(self, path: str):
+        """Load fonts from specified path"""
+        # Regular fonts
+        self.fonts["regular"] = ImageFont.truetype(path, 40)
+        self.fonts["regular_small"] = ImageFont.truetype(path, 24)
+        self.fonts["regular_large"] = ImageFont.truetype(path, 60)
+        
+        # Try to load bold
+        try:
+            bold_path = path.replace(".ttf", "bd.ttf").replace("arial", "arialbd")
+            if Path(bold_path).exists():
+                self.fonts["bold"] = ImageFont.truetype(bold_path, 48)
+                self.fonts["bold_large"] = ImageFont.truetype(bold_path, 72)
+            else:
+                # Use regular as fallback for bold
+                self.fonts["bold"] = ImageFont.truetype(path, 48)
+                self.fonts["bold_large"] = ImageFont.truetype(path, 72)
+        except:
+            self.fonts["bold"] = ImageFont.truetype(path, 48)
+            self.fonts["bold_large"] = ImageFont.truetype(path, 72)
+        
+        # Try to load italic
+        try:
+            italic_path = path.replace(".ttf", "i.ttf").replace("arial", "ariali")
+            if Path(italic_path).exists():
+                self.fonts["italic"] = ImageFont.truetype(italic_path, 32)
+            else:
+                self.fonts["italic"] = ImageFont.truetype(path, 32)
+        except:
+            self.fonts["italic"] = ImageFont.truetype(path, 32)
+    
+    def _create_fallback_fonts(self):
+        """Create fallback fonts when system fonts fail"""
+        self.fonts = {
+            "regular": ImageFont.load_default(),
+            "regular_small": ImageFont.load_default(),
+            "regular_large": ImageFont.load_default(),
+            "bold": ImageFont.load_default(),
+            "bold_large": ImageFont.load_default(),
+            "italic": ImageFont.load_default(),
+        }
+    
+    def get(self, font_type: str, size: int = None) -> ImageFont.FreeTypeFont:
+        """Get font by type"""
+        if font_type not in self.fonts:
+            Logger.log("FONT_NOT_FOUND", {"font_type": font_type}, "WARNING")
+            return ImageFont.load_default()
+        
+        if size:
+            try:
+                # Get the font path and load at new size
+                font = self.fonts[font_type]
+                # Try to get path from font object
+                if hasattr(font, 'path'):
+                    return ImageFont.truetype(font.path, size)
+                else:
+                    # Load default and scale
+                    return ImageFont.load_default()
+            except:
+                return ImageFont.load_default()
+        
+        return self.fonts[font_type]
 
 # ============================================
 # API MANAGER
 # ============================================
+
 class APIManager:
-    """Manages all external API calls with rate limiting and retries"""
+    """Manages all external API calls"""
     
     def __init__(self):
         try:
             # Load API keys from Streamlit secrets
             self.groq_client = Groq(api_key=st.secrets["groq_key"])
             self.pexels_key = st.secrets["pexels_api_key"]
-            self.cache = ProductionCache()
-            ProductionLogger.log_event("API_MANAGER_INITIALIZED")
+            self.cache = SmartCache()
+            Logger.log("API_MANAGER_INITIALIZED")
         except Exception as e:
-            ProductionLogger.log_error(e, "API initialization failed")
+            Logger.error(e, "API initialization failed")
             st.error("❌ API configuration failed. Check secrets.")
             st.stop()
-    
-    # ========== QUOTE MANAGEMENT ==========
-    @lru_cache(maxsize=100)
-    def get_quote(self, topic: str) -> Dict:
-        """Get relevant quote from Quotable API"""
-        cache_key = f"quote_{topic.lower()}"
-        cached = self.cache.get(cache_key)
-        if cached:
-            return cached
-        
-        try:
-            # Map topic to tags
-            tags = self._topic_to_tags(topic)
-            
-            # Try each tag
-            for tag in tags[:3]:  # Limit to 3 attempts
-                try:
-                    response = requests.get(
-                        f"{Config.QUOTABLE_URL}/quotes/random",
-                        params={
-                            "tags": tag,
-                            "maxLength": 150,
-                            "minLength": 50,
-                            "limit": 1
-                        },
-                        timeout=5
-                    )
-                    
-                    if response.status_code == 200:
-                        data = response.json()
-                        if data:
-                            quote_data = {
-                                "content": data[0]['content'],
-                                "author": data[0]['author'],
-                                "tags": data[0].get('tags', []),
-                                "topic": topic,
-                                "timestamp": datetime.datetime.now().isoformat()
-                            }
-                            
-                            # Cache the result
-                            self.cache.set(cache_key, quote_data)
-                            ProductionLogger.log_event("QUOTE_FETCHED", {"topic": topic, "tag": tag})
-                            return quote_data
-                except requests.Timeout:
-                    continue
-            
-            # Fallback: get random quote
-            response = requests.get(f"{Config.QUOTABLE_URL}/random", timeout=5)
-            data = response.json()
-            quote_data = {
-                "content": data['content'],
-                "author": data['author'],
-                "tags": data.get('tags', []),
-                "topic": topic,
-                "timestamp": datetime.datetime.now().isoformat()
-            }
-            
-            self.cache.set(cache_key, quote_data)
-            return quote_data
-            
-        except Exception as e:
-            ProductionLogger.log_error(e, f"Quote fetch failed for topic: {topic}")
-            # Return a fallback quote
-            return self._get_fallback_quote(topic)
     
     def _topic_to_tags(self, topic: str) -> List[str]:
         """Map user topics to Quotable API tags"""
@@ -297,6 +323,69 @@ class APIManager:
         
         return ["wisdom", "inspirational"]
     
+    @lru_cache(maxsize=100)
+    def get_quote(self, topic: str) -> Dict:
+        """Get relevant quote from Quotable API"""
+        cache_key = f"quote_{topic.lower()}"
+        cached = self.cache.get(cache_key)
+        if cached:
+            return cached
+        
+        try:
+            # Map topic to tags
+            tags = self._topic_to_tags(topic)
+            
+            # Try each tag
+            for tag in tags[:3]:  # Limit to 3 attempts
+                try:
+                    response = requests.get(
+                        f"{QUOTABLE_URL}/quotes/random",
+                        params={
+                            "tags": tag,
+                            "maxLength": 150,
+                            "minLength": 50,
+                            "limit": 1
+                        },
+                        timeout=5
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data:
+                            quote_data = {
+                                "content": data[0]['content'],
+                                "author": data[0]['author'],
+                                "tags": data[0].get('tags', []),
+                                "topic": topic,
+                                "timestamp": datetime.datetime.now().isoformat()
+                            }
+                            
+                            # Cache the result
+                            self.cache.set(cache_key, quote_data)
+                            Logger.log("QUOTE_FETCHED", {"topic": topic, "tag": tag})
+                            return quote_data
+                except requests.Timeout:
+                    continue
+            
+            # Fallback: get random quote
+            response = requests.get(f"{QUOTABLE_URL}/random", timeout=5)
+            data = response.json()
+            quote_data = {
+                "content": data['content'],
+                "author": data['author'],
+                "tags": data.get('tags', []),
+                "topic": topic,
+                "timestamp": datetime.datetime.now().isoformat()
+            }
+            
+            self.cache.set(cache_key, quote_data)
+            return quote_data
+            
+        except Exception as e:
+            Logger.error(e, f"Quote fetch failed for topic: {topic}")
+            # Return a fallback quote
+            return self._get_fallback_quote(topic)
+    
     def _get_fallback_quote(self, topic: str) -> Dict:
         """Provide fallback quotes when API fails"""
         fallback_quotes = [
@@ -317,7 +406,7 @@ class APIManager:
             "is_fallback": True
         }
     
-    # ========== AI CONTENT GENERATION ==========
+    @lru_cache(maxsize=100)
     def generate_social_content(self, quote: str, author: str, topic: str = "") -> Dict:
         """Generate TikTok/Instagram content using Groq AI"""
         cache_key = f"social_{hashlib.md5(f'{quote}_{author}'.encode()).hexdigest()}"
@@ -332,7 +421,7 @@ class APIManager:
                 kenyan_context = "Add Kenyan cultural context where relevant. Use phrases that resonate with Kenyan youth."
             
             prompt = f"""
-            You are a social media expert for "{Config.BRAND_NAME}" - a philosophy and psychology brand.
+            You are a social media expert for "{BRAND_NAME}" - a philosophy and psychology brand.
             
             QUOTE: "{quote}"
             AUTHOR: {author}
@@ -368,12 +457,12 @@ class APIManager:
             content["author"] = author
             
             self.cache.set(cache_key, content)
-            ProductionLogger.log_event("AI_CONTENT_GENERATED", {"topic": topic})
+            Logger.log("AI_CONTENT_GENERATED", {"topic": topic})
             
             return content
             
         except Exception as e:
-            ProductionLogger.log_error(e, "AI content generation failed")
+            Logger.error(e, "AI content generation failed")
             return self._get_fallback_social_content(quote, author)
     
     def _get_fallback_social_content(self, quote: str, author: str) -> Dict:
@@ -389,8 +478,7 @@ class APIManager:
             "is_fallback": True
         }
     
-    # ========== IMAGE SEARCH ==========
-    def get_background_image(self, keywords: List[str], size: Tuple[int, int] = Config.IMAGE_SIZE) -> Image.Image:
+    def get_background_image(self, keywords: List[str], size: Tuple[int, int] = IMAGE_SIZE) -> Image.Image:
         """Get background image from Pexels with caching"""
         cache_key = f"bg_{'_'.join(keywords)}_{size[0]}x{size[1]}"
         cached = self.cache.get(cache_key)
@@ -404,7 +492,7 @@ class APIManager:
             
             headers = {"Authorization": self.pexels_key}
             response = requests.get(
-                f"{Config.PEXELS_URL}/search",
+                f"{PEXELS_URL}/search",
                 params={
                     "query": query,
                     "per_page": 5,
@@ -418,8 +506,8 @@ class APIManager:
             if response.status_code == 200:
                 data = response.json()
                 if data.get('photos'):
-                    # Select the most appropriate image
-                    photo = self._select_best_photo(data['photos'], keywords)
+                    # Select the first photo
+                    photo = data['photos'][0]
                     img_url = photo['src']['large']
                     
                     # Download image
@@ -434,180 +522,74 @@ class APIManager:
                     img.save(img_bytes, format='JPEG', quality=85)
                     self.cache.set(cache_key, img_bytes.getvalue())
                     
-                    ProductionLogger.log_event("BACKGROUND_FETCHED", {"keywords": keywords})
+                    Logger.log("BACKGROUND_FETCHED", {"keywords": keywords})
                     return img
         
         except Exception as e:
-            ProductionLogger.log_error(e, f"Background fetch failed for keywords: {keywords}")
+            Logger.error(e, f"Background fetch failed for keywords: {keywords}")
         
         # Generate artistic background as fallback
         return self._generate_artistic_background(size, keywords)
-    
-    def _select_best_photo(self, photos: List[Dict], keywords: List[str]) -> Dict:
-        """Select the most appropriate photo based on keywords"""
-        # Simple scoring system
-        scored_photos = []
-        
-        for photo in photos:
-            score = 0
-            
-            # Check if keywords appear in alt text
-            alt_text = photo.get('alt', '').lower()
-            for keyword in keywords:
-                if keyword in alt_text:
-                    score += 2
-            
-            # Prefer higher quality
-            if photo.get('width', 0) > 2000:
-                score += 1
-            
-            # Prefer more colorful images (better for text overlay)
-            if photo.get('avg_color'):
-                # Simple colorfulness check (not too dark, not too bright)
-                avg_color = photo['avg_color']
-                brightness = sum(avg_color) / 3
-                if 50 < brightness < 200:
-                    score += 1
-            
-            scored_photos.append((score, photo))
-        
-        # Return highest scoring photo
-        scored_photos.sort(key=lambda x: x[0], reverse=True)
-        return scored_photos[0][1]
     
     def _generate_artistic_background(self, size: Tuple[int, int], keywords: List[str]) -> Image.Image:
         """Generate artistic background when API fails"""
         width, height = size
         
         # Create base with gradient
-        base = Image.new('RGB', size, Config.COLORS["dark_blue"])
+        base = Image.new('RGB', size, COLORS["dark_blue"])
         draw = ImageDraw.Draw(base)
         
         # Add gradient
         for y in range(height):
             alpha = y / height
-            r = int(Config.COLORS["dark_blue"][0] * (1 - alpha) + 
-                    Config.COLORS["accent_blue"][0] * alpha)
-            g = int(Config.COLORS["dark_blue"][1] * (1 - alpha) + 
-                    Config.COLORS["accent_blue"][1] * alpha)
-            b = int(Config.COLORS["dark_blue"][2] * (1 - alpha) + 
-                    Config.COLORS["accent_blue"][2] * alpha)
+            r = int(COLORS["dark_blue"][0] * (1 - alpha) + COLORS["accent_blue"][0] * alpha)
+            g = int(COLORS["dark_blue"][1] * (1 - alpha) + COLORS["accent_blue"][1] * alpha)
+            b = int(COLORS["dark_blue"][2] * (1 - alpha) + COLORS["accent_blue"][2] * alpha)
             draw.line([(0, y), (width, y)], fill=(r, g, b))
         
-        # Add abstract shapes based on keywords
-        if "watercolor" in keywords:
-            base = self._apply_watercolor_effect(base)
-        elif "abstract" in keywords:
-            base = self._add_abstract_shapes(base)
-        elif "minimalist" in keywords:
-            base = self._apply_minimalist_effect(base)
+        # Add abstract shapes
+        for _ in range(20):
+            x = random.randint(0, width)
+            y = random.randint(0, height)
+            radius = random.randint(20, 100)
+            color = random.choice([COLORS["accent_green"], COLORS["accent_blue"], COLORS["deep_green"]])
+            
+            # Create "brush stroke" effect
+            for i in range(radius, 0, -10):
+                alpha = int(50 * (i/radius))
+                draw.ellipse(
+                    [x-i, y-i, x+i, y+i],
+                    fill=color + (alpha,),
+                    outline=None
+                )
         
-        return base.filter(ImageFilter.GaussianBlur(radius=1))
-
-# ============================================
-# FONT MANAGER
-# ============================================
-class FontManager:
-    """Manages font loading and caching"""
-    
-    _instance = None
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._init_fonts()
-        return cls._instance
-    
-    def _init_fonts(self):
-        """Initialize font system"""
-        self.fonts = {}
-        self.load_fonts()
-    
-    def load_fonts(self):
-        """Load all required fonts"""
-        try:
-            for font_path in Config.FONT_PATHS:
-                if Path(font_path).exists():
-                    self._load_font_from_path(font_path)
-                    break
-            
-            # If no font found, create placeholder
-            if not self.fonts:
-                self._create_fallback_fonts()
-                
-        except Exception as e:
-            ProductionLogger.log_error(e, "Font loading failed")
-            self._create_fallback_fonts()
-    
-    def _load_font_from_path(self, path: str):
-        """Load fonts from specified path"""
-        try:
-            # Regular
-            self.fonts["regular"] = ImageFont.truetype(path, 40)
-            self.fonts["regular_small"] = ImageFont.truetype(path, 24)
-            self.fonts["regular_large"] = ImageFont.truetype(path, 60)
-            
-            # Bold (try to find bold version)
-            bold_path = path.replace(".ttf", "bd.ttf").replace("arial", "arialbd")
-            if Path(bold_path).exists():
-                self.fonts["bold"] = ImageFont.truetype(bold_path, 48)
-                self.fonts["bold_large"] = ImageFont.truetype(bold_path, 72)
-            else:
-                # Use regular as fallback
-                self.fonts["bold"] = ImageFont.truetype(path, 48)
-                self.fonts["bold_large"] = ImageFont.truetype(path, 72)
-            
-            # Italic
-            italic_path = path.replace(".ttf", "i.ttf").replace("arial", "ariali")
-            if Path(italic_path).exists():
-                self.fonts["italic"] = ImageFont.truetype(italic_path, 32)
-            else:
-                self.fonts["italic"] = ImageFont.truetype(path, 32)
-            
-            ProductionLogger.log_event("FONTS_LOADED", {"path": path})
-            
-        except Exception as e:
-            ProductionLogger.log_error(e, f"Failed to load font from {path}")
-            self._create_fallback_fonts()
-    
-    def _create_fallback_fonts(self):
-        """Create fallback fonts when system fonts fail"""
-        ProductionLogger.log_event("USING_FALLBACK_FONTS")
+        # Add texture
+        texture = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+        tex_draw = ImageDraw.Draw(texture)
         
-        # Create simple bitmap fonts as fallback
-        self.fonts = {
-            "regular": ImageFont.load_default(),
-            "regular_small": ImageFont.load_default(),
-            "regular_large": ImageFont.load_default(),
-            "bold": ImageFont.load_default(),
-            "bold_large": ImageFont.load_default(),
-            "italic": ImageFont.load_default(),
-        }
-    
-    def get(self, font_type: str, size: int = None) -> ImageFont.FreeTypeFont:
-        """Get font by type, optionally resize"""
-        if font_type not in self.fonts:
-            ProductionLogger.log_event("FONT_NOT_FOUND", {"font_type": font_type}, "WARNING")
-            return ImageFont.load_default()
+        # Paper texture effect
+        for _ in range(1000):
+            x = random.randint(0, width)
+            y = random.randint(0, height)
+            tex_draw.point((x, y), fill=(255, 255, 255, random.randint(5, 15)))
         
-        if size:
-            # Create new font with different size
-            try:
-                return ImageFont.truetype(self.fonts[font_type].path, size)
-            except:
-                return ImageFont.load_default()
+        base = Image.alpha_composite(base.convert('RGBA'), texture).convert('RGB')
         
-        return self.fonts[font_type]
+        # Apply artistic filter
+        base = base.filter(ImageFilter.GaussianBlur(1))
+        
+        return base
 
 # ============================================
 # IMAGE GENERATOR
 # ============================================
+
 class ImageGenerator:
     """Advanced image generation with multiple layouts and effects"""
     
     def __init__(self):
         self.font_manager = FontManager()
-        self.cache = ProductionCache()
+        self.cache = SmartCache()
     
     def create_quote_image(self, 
                           quote: str, 
@@ -646,12 +628,12 @@ class ImageGenerator:
             result.save(img_bytes, format='PNG', quality=95)
             self.cache.set(cache_key, img_bytes.getvalue())
             
-            ProductionLogger.log_event("IMAGE_GENERATED", {"style": style})
+            Logger.log("IMAGE_GENERATED", {"style": style})
             
             return result
             
         except Exception as e:
-            ProductionLogger.log_error(e, "Image generation failed")
+            Logger.error(e, "Image generation failed")
             return self._create_fallback_image(quote, author)
     
     def _create_text_overlay(self, quote: str, author: str, size: Tuple[int, int]) -> Image.Image:
@@ -693,12 +675,12 @@ class ImageGenerator:
             for offset in [(3, 3), (2, 2)]:
                 draw.text((x + offset[0], y_offset + offset[1]), 
                          line, font=quote_font, 
-                         fill=Config.COLORS["dark_blue"] + (100,))
+                         fill=COLORS["dark_blue"] + (100,))
             
             # Draw main text
             draw.text((x, y_offset), line, 
                      font=quote_font, 
-                     fill=Config.COLORS["white"])
+                     fill=COLORS["white"])
             
             y_offset += line_height
         
@@ -711,9 +693,9 @@ class ImageGenerator:
         
         # Author with subtle shadow
         draw.text((author_x + 1, author_y + 1), author_text,
-                 font=author_font, fill=Config.COLORS["dark_blue"] + (150,))
+                 font=author_font, fill=COLORS["dark_blue"] + (150,))
         draw.text((author_x, author_y), author_text,
-                 font=author_font, fill=Config.COLORS["light_grey"])
+                 font=author_font, fill=COLORS["light_grey"])
         
         # Draw decorative line
         line_length = 300
@@ -724,11 +706,11 @@ class ImageGenerator:
         for i in range(line_length):
             alpha = int(255 * (i / line_length))
             draw.line([(line_x + i, line_y), (line_x + i, line_y + 3)],
-                     fill=Config.COLORS["accent_green"] + (alpha,),
+                     fill=COLORS["accent_green"] + (alpha,),
                      width=3)
         
         # Draw brand watermark (center bottom)
-        brand_text = Config.BRAND_NAME
+        brand_text = BRAND_NAME
         brand_bbox = draw.textbbox((0, 0), brand_text, font=brand_font)
         brand_width = brand_bbox[2] - brand_bbox[0]
         brand_x = (width - brand_width) // 2
@@ -738,11 +720,11 @@ class ImageGenerator:
         for offset in range(3, 0, -1):
             draw.text((brand_x + offset, brand_y + offset), brand_text,
                      font=brand_font, 
-                     fill=Config.COLORS["accent_green"] + (100,))
+                     fill=COLORS["accent_green"] + (100,))
         
         draw.text((brand_x, brand_y), brand_text,
                  font=brand_font, 
-                 fill=Config.COLORS["accent_green"] + (200,))
+                 fill=COLORS["accent_green"] + (200,))
         
         return overlay
     
@@ -752,16 +734,16 @@ class ImageGenerator:
         for i in range(height):
             alpha = 200 - int(100 * (i / height))
             draw.rectangle([100, start_y + i, width - 100, start_y + i + 1],
-                          fill=Config.COLORS["dark_blue"] + (alpha,))
+                          fill=COLORS["dark_blue"] + (alpha,))
         
         # Double border
         draw.rectangle([100, start_y, width - 100, start_y + height],
-                      outline=Config.COLORS["accent_green"] + (180,),
+                      outline=COLORS["accent_green"] + (180,),
                       width=3)
         
         # Inner border
         draw.rectangle([103, start_y + 3, width - 103, start_y + height - 3],
-                      outline=Config.COLORS["white"] + (80,),
+                      outline=COLORS["white"] + (80,),
                       width=1)
         
         # Corner decorations
@@ -775,7 +757,7 @@ class ImageGenerator:
         
         for corner_x, corner_y in corners:
             draw.rectangle([corner_x, corner_y, corner_x + corner_size, corner_y + corner_size],
-                          fill=Config.COLORS["accent_green"] + (120,))
+                          fill=COLORS["accent_green"] + (120,))
     
     def _wrap_text(self, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> List[str]:
         """Wrap text to fit within max width"""
@@ -818,7 +800,7 @@ class ImageGenerator:
         result = Image.blend(blurred, img, alpha=0.7)
         
         # Apply color overlay
-        overlay = Image.new('RGB', img.size, Config.COLORS["accent_blue"])
+        overlay = Image.new('RGB', img.size, COLORS["accent_blue"])
         result = Image.blend(result, overlay, alpha=0.1)
         
         return result
@@ -885,20 +867,20 @@ class ImageGenerator:
     
     def _create_fallback_image(self, quote: str, author: str) -> Image.Image:
         """Create simple fallback image"""
-        img = Image.new('RGB', Config.IMAGE_SIZE, Config.COLORS["dark_blue"])
+        img = Image.new('RGB', IMAGE_SIZE, COLORS["dark_blue"])
         draw = ImageDraw.Draw(img)
         
         # Simple text
         font = self.font_manager.get("regular")
-        draw.text((100, 100), f'"{quote}"', fill=Config.COLORS["white"], font=font)
-        draw.text((100, 300), f"- {author}", fill=Config.COLORS["light_grey"], font=font)
+        draw.text((100, 100), f'"{quote}"', fill=COLORS["white"], font=font)
+        draw.text((100, 300), f"- {author}", fill=COLORS["light_grey"], font=font)
         
         return img
     
     def create_animation(self, 
                         static_image: Image.Image, 
-                        duration: int = Config.ANIMATION_DURATION,
-                        fps: int = Config.ANIMATION_FPS) -> BytesIO:
+                        duration: int = ANIMATION_DURATION,
+                        fps: int = ANIMATION_FPS) -> BytesIO:
         """Create animated video from image"""
         cache_key = f"anim_{hashlib.md5(static_image.tobytes()).hexdigest()}"
         cached = self.cache.get(cache_key)
@@ -943,7 +925,7 @@ class ImageGenerator:
                     else:
                         # Zoom out - add border
                         resized = np.array(Image.fromarray(frame).resize((new_w, new_h)))
-                        frame = np.full((h, w, 3), Config.COLORS["dark_blue"], dtype=np.uint8)
+                        frame = np.full((h, w, 3), COLORS["dark_blue"], dtype=np.uint8)
                         paste_y = (h - new_h) // 2
                         paste_x = (w - new_w) // 2
                         frame[paste_y:paste_y + new_h, paste_x:paste_x + new_w] = resized
@@ -969,21 +951,21 @@ class ImageGenerator:
             self.cache.set(cache_key, buffer.getvalue())
             buffer.seek(0)
             
-            ProductionLogger.log_event("ANIMATION_GENERATED", {"duration": duration, "fps": fps})
+            Logger.log("ANIMATION_GENERATED", {"duration": duration, "fps": fps})
             
             return buffer
             
         except Exception as e:
-            ProductionLogger.log_error(e, "Animation generation failed")
+            Logger.error(e, "Animation generation failed")
             # Return empty buffer
             return BytesIO()
     
     def create_story_format(self, image: Image.Image) -> Image.Image:
         """Convert square image to story format (9:16)"""
-        width, height = Config.STORY_SIZE
+        width, height = STORY_SIZE
         
         # Create new canvas
-        story = Image.new('RGB', (width, height), Config.COLORS["dark_blue"])
+        story = Image.new('RGB', (width, height), COLORS["dark_blue"])
         
         # Resize original image to fit width
         img_resized = image.resize((width, width), Image.Resampling.LANCZOS)
@@ -1013,6 +995,7 @@ class ImageGenerator:
 # ============================================
 # SOCIAL MEDIA MANAGER
 # ============================================
+
 class SocialMediaManager:
     """Manages social media posting strategy"""
     
@@ -1046,10 +1029,10 @@ class SocialMediaManager:
         topic_tags = {
             "philosophy": ["#Philosophy", "#Wisdom", "#DeepThoughts", "#Stoicism"],
             "psychology": ["#Psychology", "#Mindfulness", "#MentalHealth", "#SelfCare"],
-            "motivation": ["#Motivation", "#Inspiration", "#Success", #Hustle"],
-            "spiritual": ["#Spirituality", #Faith", "#Meditation", "#Peace"],
-            "love": ["#Love", "#Relationships", #Heart", "#Family"],
-            "business": ["#Business", #Entrepreneurship", #HustleKE", "#MoneyMindset"]
+            "motivation": ["#Motivation", "#Inspiration", "#Success", "#Hustle"],
+            "spiritual": ["#Spirituality", "#Faith", "#Meditation", "#Peace"],
+            "love": ["#Love", "#Relationships", "#Heart", "#Family"],
+            "business": ["#Business", "#Entrepreneurship", "#HustleKE", "#MoneyMindset"]
         }
         
         # Platform-specific hashtags
@@ -1057,7 +1040,7 @@ class SocialMediaManager:
             "tiktok": ["#FYP", "#ForYou", "#ForYouPage", "#Viral"],
             "instagram": ["#InstaGood", "#PhotoOfTheDay", "#IG", "#Reels"],
             "twitter": ["#Thread", "#QuoteTweet", "#Twitter"],
-            "all": ["#" + Config.BRAND_NAME.lower(), "#Quote", "#DailyQuote", "#ThoughtOfTheDay"]
+            "all": ["#" + BRAND_NAME.lower(), "#Quote", "#DailyQuote", "#ThoughtOfTheDay"]
         }
         
         # Combine based on topic
@@ -1106,19 +1089,20 @@ class SocialMediaManager:
 # ============================================
 # MAIN STREAMLIT APP
 # ============================================
+
 def main():
     """Main Streamlit application"""
     
     # ========== PAGE CONFIG ==========
     st.set_page_config(
-        page_title=f"{Config.BRAND_NAME} | AI Quote Generator",
+        page_title=f"{BRAND_NAME} | AI Quote Generator",
         page_icon="🧠",
         layout="wide",
         initial_sidebar_state="expanded",
         menu_items={
             'Get Help': 'https://github.com/stillmind',
             'Report a bug': "https://github.com/stillmind/issues",
-            'About': f"### {Config.BRAND_NAME}\n{Config.BRAND_TAGLINE}\n\nVersion 3.0 | Production"
+            'About': f"### {BRAND_NAME}\n{BRAND_TAGLINE}\n\nVersion 3.0 | Production"
         }
     )
     
@@ -1133,8 +1117,8 @@ def main():
     
     .main-title {{
         background: linear-gradient(135deg, 
-            rgba({Config.COLORS['dark_blue'][0]}, {Config.COLORS['dark_blue'][1]}, {Config.COLORS['dark_blue'][2]}, 0.9),
-            rgba({Config.COLORS['deep_green'][0]}, {Config.COLORS['deep_green'][1]}, {Config.COLORS['deep_green'][2]}, 0.9));
+            rgba({COLORS['dark_blue'][0]}, {COLORS['dark_blue'][1]}, {COLORS['dark_blue'][2]}, 0.9),
+            rgba({COLORS['deep_green'][0]}, {COLORS['deep_green'][1]}, {COLORS['deep_green'][2]}, 0.9));
         padding: 3rem 2rem;
         border-radius: 20px;
         margin-bottom: 2rem;
@@ -1165,9 +1149,9 @@ def main():
         width: 20px;
         height: 15px;
         background: linear-gradient(to bottom, 
-            #{Config.COLORS['kenyan_flag_black'][0]:02x}{Config.COLORS['kenyan_flag_black'][1]:02x}{Config.COLORS['kenyan_flag_black'][2]:02x} 33%, 
-            #{Config.COLORS['kenyan_flag_red'][0]:02x}{Config.COLORS['kenyan_flag_red'][1]:02x}{Config.COLORS['kenyan_flag_red'][2]:02x} 33% 66%, 
-            #{Config.COLORS['kenyan_flag_green'][0]:02x}{Config.COLORS['kenyan_flag_green'][1]:02x}{Config.COLORS['kenyan_flag_green'][2]:02x} 66%);
+            #{COLORS['kenyan_flag_black'][0]:02x}{COLORS['kenyan_flag_black'][1]:02x}{COLORS['kenyan_flag_black'][2]:02x} 33%, 
+            #{COLORS['kenyan_flag_red'][0]:02x}{COLORS['kenyan_flag_red'][1]:02x}{COLORS['kenyan_flag_red'][2]:02x} 33% 66%, 
+            #{COLORS['kenyan_flag_green'][0]:02x}{COLORS['kenyan_flag_green'][1]:02x}{COLORS['kenyan_flag_green'][2]:02x} 66%);
         margin: 0 5px;
         border-radius: 2px;
     }}
@@ -1184,7 +1168,7 @@ def main():
     .stat-number {{
         font-size: 2rem;
         font-weight: 700;
-        color: #{Config.COLORS['accent_green'][0]:02x}{Config.COLORS['accent_green'][1]:02x}{Config.COLORS['accent_green'][2]:02x};
+        color: #{COLORS['accent_green'][0]:02x}{COLORS['accent_green'][1]:02x}{COLORS['accent_green'][2]:02x};
         margin-bottom: 0.5rem;
     }}
     
@@ -1197,8 +1181,8 @@ def main():
     
     .generate-btn {{
         background: linear-gradient(135deg, 
-            #{Config.COLORS['deep_green'][0]:02x}{Config.COLORS['deep_green'][1]:02x}{Config.COLORS['deep_green'][2]:02x},
-            #{Config.COLORS['dark_blue'][0]:02x}{Config.COLORS['dark_blue'][1]:02x}{Config.COLORS['dark_blue'][2]:02x});
+            #{COLORS['deep_green'][0]:02x}{COLORS['deep_green'][1]:02x}{COLORS['deep_green'][2]:02x},
+            #{COLORS['dark_blue'][0]:02x}{COLORS['dark_blue'][1]:02x}{COLORS['dark_blue'][2]:02x});
         color: white;
         border: none;
         padding: 1.2rem 2.5rem;
@@ -1215,7 +1199,7 @@ def main():
     
     .generate-btn:hover {{
         transform: translateY(-3px);
-        box-shadow: 0 15px 30px rgba({Config.COLORS['deep_green'][0]}, {Config.COLORS['deep_green'][1]}, {Config.COLORS['deep_green'][2]}, 0.4);
+        box-shadow: 0 15px 30px rgba({COLORS['deep_green'][0]}, {COLORS['deep_green'][1]}, {COLORS['deep_green'][2]}, 0.4);
     }}
     
     .generate-btn:active {{
@@ -1264,7 +1248,7 @@ def main():
         position: fixed;
         bottom: 20px;
         right: 20px;
-        color: rgba({Config.COLORS['accent_green'][0]}, {Config.COLORS['accent_green'][1]}, {Config.COLORS['accent_green'][2]}, 0.05);
+        color: rgba({COLORS['accent_green'][0]}, {COLORS['accent_green'][1]}, {COLORS['accent_green'][2]}, 0.05);
         font-size: 8rem;
         font-weight: 900;
         z-index: -1;
@@ -1307,7 +1291,7 @@ def main():
     }}
     </style>
     
-    <div class="watermark">{Config.BRAND_NAME.upper()}</div>
+    <div class="watermark">{BRAND_NAME.upper()}</div>
     """, unsafe_allow_html=True)
     
     # ========== INITIALIZATION ==========
@@ -1317,7 +1301,7 @@ def main():
             st.session_state.image_generator = ImageGenerator()
             st.session_state.generation_count = 0
             st.session_state.cache_stats = {"hits": 0, "misses": 0}
-            ProductionLogger.log_event("APP_INITIALIZED")
+            Logger.log("APP_INITIALIZED")
     
     # Get instances
     api = st.session_state.api_manager
@@ -1326,8 +1310,8 @@ def main():
     # ========== HEADER ==========
     st.markdown(f"""
     <div class="main-title">
-        <h1>{Config.BRAND_NAME}</h1>
-        <p>{Config.BRAND_TAGLINE} • Made with <span class="kenyan-flag"></span> for global minds</p>
+        <h1>{BRAND_NAME}</h1>
+        <p>{BRAND_TAGLINE} • Made with <span class="kenyan-flag"></span> for global minds</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1470,7 +1454,7 @@ def main():
                         "timestamp": datetime.datetime.now().isoformat()
                     }
                     
-                    ProductionLogger.log_event("GENERATION_COMPLETE", {
+                    Logger.log("GENERATION_COMPLETE", {
                         "topic": topic,
                         "time_taken": st.session_state.current_result["generation_time"]
                     })
@@ -1478,7 +1462,7 @@ def main():
                     st.success(f"✅ Generated in {st.session_state.current_result['generation_time']:.2f}s")
                     
                 except Exception as e:
-                    ProductionLogger.log_error(e, "Generation failed")
+                    Logger.error(e, "Generation failed")
                     st.error("❌ Generation failed. Please try again.")
     
     with col_right:
@@ -1519,7 +1503,7 @@ def main():
         with st.expander("⚙️ Cache Management"):
             st.markdown(f"""
             **Current Cache Stats:**
-            - Size: {cache_stats['size']}/{Config.MAX_CACHE_SIZE}
+            - Size: {cache_stats['size']}/{MAX_CACHE_SIZE}
             - Hit Rate: {cache_stats['hit_rate']}
             - Hits: {cache_stats['hits']}
             - Misses: {cache_stats['misses']}
@@ -1563,15 +1547,15 @@ def main():
                 
                 # Quote card
                 st.markdown(f"""
-                <div style="background: rgba({Config.COLORS['dark_blue'][0]}, {Config.COLORS['dark_blue'][1]}, {Config.COLORS['dark_blue'][2]}, 0.1);
+                <div style="background: rgba({COLORS['dark_blue'][0]}, {COLORS['dark_blue'][1]}, {COLORS['dark_blue'][2]}, 0.1);
                           padding: 2rem;
                           border-radius: 15px;
-                          border-left: 5px solid #{Config.COLORS['accent_green'][0]:02x}{Config.COLORS['accent_green'][1]:02x}{Config.COLORS['accent_green'][2]:02x};
+                          border-left: 5px solid #{COLORS['accent_green'][0]:02x}{COLORS['accent_green'][1]:02x}{COLORS['accent_green'][2]:02x};
                           margin-bottom: 1.5rem;">
                     <p style="font-size: 1.3rem; font-style: italic; line-height: 1.6; color: #333;">
                     "{result['quote']['content']}"
                     </p>
-                    <p style="text-align: right; font-weight: 600; color: #{Config.COLORS['accent_blue'][0]:02x}{Config.COLORS['accent_blue'][1]:02x}{Config.COLORS['accent_blue'][2]:02x};">
+                    <p style="text-align: right; font-weight: 600; color: #{COLORS['accent_blue'][0]:02x}{COLORS['accent_blue'][1]:02x}{COLORS['accent_blue'][2]:02x};">
                     — {result['quote']['author']}
                     </p>
                 </div>
@@ -1772,7 +1756,7 @@ def main():
             
             with format_cols[3]:
                 # Content Bundle
-                content = f"""# {Config.BRAND_NAME} - Social Media Content
+                content = f"""# {BRAND_NAME} - Social Media Content
                 
 Topic: {result['topic']}
 Generated: {result['timestamp']}
@@ -1803,13 +1787,13 @@ Generated: {result['timestamp']}
                 
 ## Platform-Specific Strategies
                 
-{TikTok Strategy}
+TikTok Strategy
 - Duration: 6 seconds
 - Hook: First 3 seconds
 - Audio: {result['social'].get('audio_suggestion', 'Trending sound')}
 - CTA: Ask question in comments
                 
-{Instagram Strategy}
+Instagram Strategy
 - Post to: Feed & Reels
 - Stories: Add interactive stickers
 - Hashtags: 10-15 relevant
@@ -1859,7 +1843,7 @@ Generated: {result['timestamp']}
     with col_left:
         st.markdown(f"""
         <div style="text-align: center; color: #666;">
-            <p><strong>{Config.BRAND_NAME}</strong> v3.0</p>
+            <p><strong>{BRAND_NAME}</strong> v3.0</p>
             <p style="font-size: 0.9rem;">Production Ready</p>
         </div>
         """, unsafe_allow_html=True)
@@ -1884,23 +1868,33 @@ Generated: {result['timestamp']}
 # ENTRY POINT
 # ============================================
 if __name__ == "__main__":
-    # Environment check
+    # Check for required secrets
     required_secrets = ["groq_key", "pexels_api_key"]
-    missing_secrets = []
     
-    for secret in required_secrets:
-        if secret not in st.secrets:
-            missing_secrets.append(secret)
-    
-    if missing_secrets:
-        st.error(f"❌ Missing secrets: {', '.join(missing_secrets)}")
-        st.info("Please add these to your Streamlit secrets.")
-        st.stop()
-    
-    # Run the app
     try:
-        main()
+        # Check if Streamlit secrets are available
+        if hasattr(st, 'secrets'):
+            # Check if all required secrets exist
+            missing_secrets = []
+            for secret in required_secrets:
+                if secret not in st.secrets:
+                    missing_secrets.append(secret)
+            
+            if missing_secrets:
+                st.error(f"❌ Missing secrets: {', '.join(missing_secrets)}")
+                st.info("Please add these to your Streamlit secrets.")
+                st.stop()
+            
+            # Run the app
+            main()
+        else:
+            st.error("❌ Streamlit secrets not found. Please configure your secrets.")
+            st.info("""
+            For local development, create a `.streamlit/secrets.toml` file with:
+            
+            groq_key = "your_groq_api_key_here"
+            pexels_api_key = "your_pexels_api_key_here"
+            """)
     except Exception as e:
-        ProductionLogger.log_error(e, "App crashed")
-        st.error("🚨 Application error. Please refresh and try again.")
-        st.code(str(e), language="python")
+        st.error(f"🚨 Application error: {str(e)}")
+        Logger.error(e, "App crashed")
