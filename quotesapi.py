@@ -273,7 +273,7 @@ class APIManager:
     def __init__(self):
         try:
             # Load API keys from Streamlit secrets
-            self.groq_client = Groq(api_key=st.secrets["groq_key"])
+            self.groq_client st.secrets["groq_key"]
             self.pexels_key = st.secrets["pexels_api_key"]
             self.cache = SmartCache()
             Logger.log("API_MANAGER_INITIALIZED")
