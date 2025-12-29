@@ -144,7 +144,7 @@ W, H = 1080, 1920 # Vertical TikTok Size
 
 # Live Preview
 frame = create_master_frame(W, H, "Psalm", 23, 1, hook, t=t_scrub)
-st.image(frame, use_container_width=True)
+st.image(frame, use_column_width=True)
 
 if st.button("🎬 Render Final Meditation"):
     with st.spinner("Simulating river ripples and bird reflections..."):
