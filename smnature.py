@@ -1,643 +1,292 @@
 import streamlit as st
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-import io, os, math, time, random, textwrap
-import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+import io, os, math, numpy as np
 from moviepy.editor import VideoClip
+import random
 
 # ============================================================================
-# MODERN FLAT DESIGN SYSTEM
+# ANIMATED FLAT DESIGN - EMOTIONAL CONNECTION
 # ============================================================================
-st.set_page_config(
-    page_title="Still Mind Modern",
-    page_icon="✨",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="Emotional Flat Animation", layout="wide")
 
-# Flat design color palettes inspired by examples
-THEMES = {
-    "Minimal Navy": {
-        "primary": (10, 25, 45, 255),        # Deep Navy (from examples)
-        "secondary": (76, 175, 80, 255),     # Emerald Green
-        "accent": (255, 195, 0, 255),        # Gold/Yellow
-        "text": (255, 255, 255, 255),        # Pure White
-        "background": (20, 40, 70, 255),     # Blue-Grey
-        "surface": (30, 50, 90, 255),        # Lighter Navy
-        "border": 3                          # Thin border
+# Simple palette that creates emotional responses
+EMOTIONAL_COLORS = {
+    "Calm": {
+        "bg": (230, 240, 245, 255),  # Soft blue
+        "primary": (76, 175, 80, 255),  # Peaceful green
+        "accent": (100, 150, 200, 255),  # Trust blue
+        "text": (50, 50, 50, 255)  # Dark for readability
     },
-    "Clean White": {
-        "primary": (255, 255, 255, 255),     # Pure White
-        "secondary": (10, 25, 45, 255),      # Navy Blue
-        "accent": (230, 57, 70, 255),        # Red Accent
-        "text": (10, 25, 45, 255),           # Navy Text
-        "background": (245, 245, 245, 255),  # Light Grey
-        "surface": (255, 255, 255, 255),     # White surface
-        "border": 4
+    "Hope": {
+        "bg": (255, 250, 230, 255),  # Warm cream
+        "primary": (255, 193, 7, 255),  # Golden yellow
+        "accent": (255, 152, 0, 255),  # Sunrise orange
+        "text": (60, 40, 20, 255)
     },
-    "Warm Beige": {
-        "primary": (245, 229, 208, 255),     # Warm Beige
-        "secondary": (118, 68, 138, 255),    # Purple
-        "accent": (46, 196, 182, 255),       # Teal
-        "text": (40, 30, 20, 255),           # Dark Brown
-        "background": (255, 250, 240, 255),  # Off-white
-        "surface": (235, 219, 188, 255),     # Beige surface
-        "border": 3
-    }
-}
-
-# Font styles
-FONT_STYLES = {
-    "Bold Sans": {"family": "DejaVuSans-Bold.ttf", "spacing": 1.0},
-    "Clean Serif": {"family": "DejaVuSerif.ttf", "spacing": 1.1},
-    "Modern Mono": {"family": "DejaVuSansMono.ttf", "spacing": 1.2},
-    "Light Sans": {"family": "DejaVuSans-ExtraLight.ttf", "spacing": 1.0}
-}
-
-# Layout templates inspired by examples
-LAYOUTS = {
-    "Centered Text": {
-        "title_pos": "center",
-        "verse_pos": "center",
-        "ref_pos": "bottom_right",
-        "brand_pos": "bottom_left"
-    },
-    "Left Aligned": {
-        "title_pos": "left",
-        "verse_pos": "left",
-        "ref_pos": "right",
-        "brand_pos": "bottom_center"
-    },
-    "Top Heavy": {
-        "title_pos": "top_center",
-        "verse_pos": "center",
-        "ref_pos": "bottom_center",
-        "brand_pos": "bottom_right"
+    "Strength": {
+        "bg": (25, 35, 45, 255),  # Deep navy
+        "primary": (244, 67, 54, 255),  # Bold red
+        "accent": (255, 235, 59, 255),  # Bright yellow
+        "text": (255, 255, 255, 255)  # White for contrast
     }
 }
 
 # ============================================================================
-# FONT MANAGEMENT
+# EMOTIONAL ANIMATIONS PEOPLE RELATE TO
 # ============================================================================
-@st.cache_resource
-def load_font_safe(font_name, size):
-    """Load font with multiple fallback options."""
-    font_config = FONT_STYLES.get(font_name, FONT_STYLES["Bold Sans"])
-    font_family = font_config["family"]
+
+def animate_breathing_circle(draw, x, y, t, colors, emotion="Calm"):
+    """A breathing circle that mimics calm breathing patterns."""
+    if emotion == "Calm":
+        # Slow, deep breaths
+        breath_rate = 0.5
+        min_size = 40
+        max_size = 60
+    elif emotion == "Anxious":
+        # Quick, shallow breaths
+        breath_rate = 3.0
+        min_size = 30
+        max_size = 50
+    else:
+        # Normal breathing
+        breath_rate = 1.0
+        min_size = 35
+        max_size = 55
     
-    font_paths = [
-        f"/usr/share/fonts/truetype/dejavu/{font_family}",
-        f"/System/Library/Fonts/{font_family.replace('.ttf', '.ttc')}",
-        "C:/Windows/Fonts/arial.ttf",
-        "C:/Windows/Fonts/times.ttf",
-        "C:/Windows/Fonts/cour.ttf"
+    # Breathing pattern
+    breath = math.sin(t * breath_rate * 2 * math.pi) * 0.5 + 0.5
+    size = min_size + (max_size - min_size) * breath
+    
+    # Draw breathing circle
+    draw.ellipse([x-size, y-size, x+size, y+size], 
+                outline=colors["primary"], width=3)
+    
+    # Pulsing center
+    pulse_size = 8 + 4 * math.sin(t * 4)
+    draw.ellipse([x-pulse_size, y-pulse_size, x+pulse_size, y+pulse_size], 
+                fill=colors["primary"])
+
+def animate_heartbeat(draw, x, y, t, colors):
+    """Simple heartbeat animation."""
+    # Heart shape (simplified flat design)
+    beat = abs(math.sin(t * 5)) * 10  # Heartbeat effect
+    size = 30 + beat
+    
+    # Flat heart shape
+    points = [
+        (x, y - size),
+        (x + size, y),
+        (x, y + size),
+        (x - size, y)
     ]
     
-    for font_path in font_paths:
-        if os.path.exists(font_path):
-            try:
-                return ImageFont.truetype(font_path, size)
-            except:
-                continue
+    # Animate color with heartbeat
+    if int(t * 5) % 2 == 0:  # Every other beat
+        heart_color = colors["primary"]
+    else:
+        # Slightly darker for pulse effect
+        heart_color = tuple(max(0, c-40) for c in colors["primary"][:3]) + (255,)
     
-    # Ultimate fallback
-    return ImageFont.load_default(size)
+    draw.polygon(points, fill=heart_color)
 
-# ============================================================================
-# TEXT LAYOUT ENGINE
-# ============================================================================
-def calculate_text_layout(text, font, max_width, max_height, line_spacing=1.2):
-    """Calculate how to fit text within boundaries."""
+def animate_flowing_line(draw, start_x, start_y, end_x, end_y, t, colors):
+    """A line that flows like a river or breath."""
+    # Draw flowing line segment by segment
+    segments = 10
+    segment_length = math.sqrt((end_x-start_x)**2 + (end_y-start_y)**2) / segments
+    
+    for i in range(segments):
+        # Offset each segment for flowing effect
+        flow_offset = math.sin(t * 2 + i) * 5
+        
+        seg_start_x = start_x + (end_x - start_x) * i / segments
+        seg_start_y = start_y + (end_y - start_y) * i / segments + flow_offset
+        seg_end_x = start_x + (end_x - start_x) * (i+1) / segments
+        seg_end_y = start_y + (end_y - start_y) * (i+1) / segments + flow_offset
+        
+        # Alpha decreases towards end
+        alpha = int(255 * (1 - i/segments))
+        line_color = colors["primary"][:3] + (alpha,)
+        
+        draw.line([(seg_start_x, seg_start_y), (seg_end_x, seg_end_y)], 
+                 fill=line_color, width=3)
+
+def animate_growing_tree(draw, x, y, t, colors):
+    """A tree that grows from the ground up."""
+    growth_progress = min(1.0, t / 3)  # 3 seconds to fully grow
+    
+    # Trunk grows first
+    trunk_height = 100 * growth_progress
+    if growth_progress > 0:
+        # Trunk
+        draw.rectangle([x-8, y, x+8, y-trunk_height], 
+                      fill=colors["accent"])
+        
+        # Leaves appear after trunk
+        leaves_progress = max(0, (growth_progress - 0.3) / 0.7)
+        if leaves_progress > 0:
+            leaf_size = 30 * leaves_progress
+            
+            # Three main leaf clusters
+            draw.ellipse([x-leaf_size, y-trunk_height-leaf_size, 
+                         x+leaf_size, y-trunk_height+leaf_size], 
+                        fill=colors["primary"])
+            
+            draw.ellipse([x-20-leaf_size, y-trunk_height+10-leaf_size, 
+                         x-20+leaf_size, y-trunk_height+10+leaf_size], 
+                        fill=colors["primary"])
+            
+            draw.ellipse([x+20-leaf_size, y-trunk_height+10-leaf_size, 
+                         x+20+leaf_size, y-trunk_height+10+leaf_size], 
+                        fill=colors["primary"])
+
+def animate_rising_sun(draw, width, height, t, colors):
+    """Sunrise animation symbolizing hope."""
+    rise_progress = min(1.0, t / 4)  # 4 seconds to rise
+    
+    sun_y = height * 0.8 - (rise_progress * height * 0.5)
+    sun_size = 60
+    
+    # Sun
+    draw.ellipse([width//2-sun_size, sun_y-sun_size, 
+                 width//2+sun_size, sun_y+sun_size], 
+                fill=colors["primary"])
+    
+    # Sun rays (appear as sun rises)
+    if rise_progress > 0.5:
+        ray_count = 8
+        ray_length = 40
+        
+        for i in range(ray_count):
+            angle = (i / ray_count) * 2 * math.pi
+            start_x = width//2 + (sun_size+5) * math.cos(angle)
+            start_y = sun_y + (sun_size+5) * math.sin(angle)
+            end_x = start_x + ray_length * math.cos(angle) * rise_progress
+            end_y = start_y + ray_length * math.sin(angle) * rise_progress
+            
+            draw.line([(start_x, start_y), (end_x, end_y)], 
+                     fill=colors["primary"], width=3)
+
+def animate_emotional_text(draw, text, x, y, t, font, colors, emotion="Calm"):
+    """Text animation that matches emotional tone."""
     words = text.split()
-    lines = []
-    current_line = []
     
-    for word in words:
-        test_line = ' '.join(current_line + [word])
-        bbox = font.getbbox(test_line) if hasattr(font, 'getbbox') else font.getsize(test_line)
-        text_width = bbox[2] - bbox[0] if hasattr(font, 'getbbox') else bbox[0]
+    if emotion == "Calm":
+        # Words appear slowly, one by one
+        word_delay = 0.3
+        words_to_show = min(len(words), int(t / word_delay))
+        visible_text = " ".join(words[:words_to_show])
         
-        if text_width <= max_width:
-            current_line.append(word)
+    elif emotion == "Hope":
+        # Words appear with a gentle fade in
+        word_progress = min(1.0, t / 2)
+        visible_chars = int(len(text) * word_progress)
+        visible_text = text[:visible_chars]
+        
+    elif emotion == "Strength":
+        # Words appear all at once but with impact
+        if t > 0.5:
+            visible_text = text
+            # Add a slight shake effect
+            shake_x = x + random.randint(-2, 2)
+            shake_y = y + random.randint(-1, 1)
         else:
-            if current_line:
-                lines.append(' '.join(current_line))
-            current_line = [word]
+            visible_text = ""
+            shake_x, shake_y = x, y
+        x, y = shake_x, shake_y
     
-    if current_line:
-        lines.append(' '.join(current_line))
-    
-    # Calculate total height
-    if hasattr(font, 'getbbox'):
-        line_height = font.getbbox("A")[3] * line_spacing
     else:
-        line_height = font.getsize("A")[1] * line_spacing
+        # Default typewriter
+        visible_chars = int(len(text) * min(1.0, t / 3))
+        visible_text = text[:visible_chars]
     
-    total_height = len(lines) * line_height
-    
-    return lines, line_height, total_height
+    # Draw text
+    draw.text((x, y), visible_text, font=font, fill=colors["text"])
 
-def draw_text_block(draw, lines, font, position, color, line_height, align="center", max_width=None):
-    """Draw a block of text with specified alignment."""
-    x, y = position
-    
-    for i, line in enumerate(lines):
-        if hasattr(font, 'getbbox'):
-            bbox = font.getbbox(line)
-            line_width = bbox[2] - bbox[0]
-        else:
-            line_width = font.getsize(line)[0]
-        
-        if align == "center":
-            line_x = x - line_width // 2
-        elif align == "right":
-            line_x = x - line_width
-        else:  # left
-            line_x = x
-        
-        draw.text((line_x, y + i * line_height), line, font=font, fill=color)
-    
-    return y + len(lines) * line_height
-
-# ============================================================================
-# FLAT DESIGN ELEMENTS
-# ============================================================================
-def draw_geometric_background(draw, width, height, colors, style="solid"):
-    """Draw modern flat background."""
-    if style == "gradient":
-        # Simple vertical gradient
-        for y in range(height):
-            ratio = y / height
-            r = int(colors["primary"][0] * (1 - ratio) + colors["background"][0] * ratio)
-            g = int(colors["primary"][1] * (1 - ratio) + colors["background"][1] * ratio)
-            b = int(colors["primary"][2] * (1 - ratio) + colors["background"][2] * ratio)
-            draw.line([(0, y), (width, y)], fill=(r, g, b, 255))
-    else:
-        # Solid color
-        draw.rectangle([0, 0, width, height], fill=colors["primary"])
-
-def draw_simple_ornaments(draw, width, height, colors):
-    """Draw minimalist geometric ornaments like in examples."""
-    # Top left ornament (corner)
-    corner_size = 60
-    draw.line([(40, 40), (40, 40 + corner_size)], fill=colors["accent"], width=3)
-    draw.line([(40, 40), (40 + corner_size, 40)], fill=colors["accent"], width=3)
-    
-    # Bottom right ornament
-    draw.line([(width - 40, height - 40), (width - 40, height - 40 - corner_size)], 
-              fill=colors["accent"], width=3)
-    draw.line([(width - 40, height - 40), (width - 40 - corner_size, height - 40)], 
-              fill=colors["accent"], width=3)
-
-def draw_modern_divider(draw, x1, y1, x2, y2, color, width=3, style="line"):
-    """Draw modern divider lines."""
-    if style == "dashed":
-        # Dashed line
-        dash_length = 20
-        gap_length = 10
-        current_x = x1
-        while current_x < x2:
-            draw.line([(current_x, y1), (min(current_x + dash_length, x2), y1)], 
-                     fill=color, width=width)
-            current_x += dash_length + gap_length
-    else:
-        # Solid line
-        draw.line([(x1, y1), (x2, y2)], fill=color, width=width)
-
-# ============================================================================
-# MAIN COMPOSITION ENGINE
-# ============================================================================
-def create_modern_flat_design(width, height, theme_name, layout_name, 
-                            font_style, title_text, verse_text, reference, 
-                            brand_text="", t=0, is_video=False):
-    """Create a modern flat design composition."""
-    colors = THEMES[theme_name]
-    layout = LAYOUTS[layout_name]
+def create_emotional_scene(width, height, emotion, verse, t, is_video=False):
+    """Create an emotionally resonant animated scene."""
+    colors = EMOTIONAL_COLORS[emotion]
     
     # Create image
-    img = Image.new("RGBA", (width, height), colors["primary"])
+    img = Image.new("RGBA", (width, height), colors["bg"])
     draw = ImageDraw.Draw(img)
     
-    # Add subtle texture/noise for modern look
-    if colors["primary"][0] < 100:  # Dark background
-        noise = np.random.randint(0, 20, (height, width, 3), dtype=np.uint8)
-        noise_img = Image.fromarray(noise, mode='RGB').convert('RGBA')
-        noise_img.putalpha(3)  # Very subtle
-        img = Image.alpha_composite(img, noise_img)
-        draw = ImageDraw.Draw(img)
+    # Font
+    try:
+        font = ImageFont.truetype("arial.ttf", 48)
+    except:
+        font = ImageFont.load_default(48)
     
-    # Draw background elements
-    draw_geometric_background(draw, width, height, colors, "solid")
-    draw_simple_ornaments(draw, width, height, colors)
-    
-    # Calculate text areas
-    content_width = width - 160  # Margins
-    content_height = height - 240
-    
-    # Load fonts
-    title_font = load_font_safe(font_style, 72)
-    verse_font = load_font_safe(font_style, 56)
-    ref_font = load_font_safe(font_style, 42)
-    brand_font = load_font_safe(font_style, 28)
-    
-    # Typewriter effect for verse
-    if is_video:
-        verse_duration = 5
-        verse_progress = min(1.0, t / verse_duration)
-        visible_verse = verse_text[:int(len(verse_text) * verse_progress)]
-    else:
-        verse_progress = 1.0
-        visible_verse = verse_text
-    
-    # Layout calculations
-    title_lines, title_line_height, title_total_height = calculate_text_layout(
-        title_text, title_font, content_width, content_height // 4
-    )
-    
-    verse_lines, verse_line_height, verse_total_height = calculate_text_layout(
-        visible_verse, verse_font, content_width, content_height // 2
-    )
-    
-    # Draw title based on layout
-    if layout["title_pos"] == "center":
-        title_y = height * 0.2
-        draw_text_block(draw, title_lines, title_font, 
-                       (width // 2, title_y), colors["secondary"], 
-                       title_line_height, "center")
-    elif layout["title_pos"] == "left":
-        title_y = height * 0.15
-        draw_text_block(draw, title_lines, title_font, 
-                       (80, title_y), colors["secondary"], 
-                       title_line_height, "left")
-    else:  # top_center
-        title_y = 80
-        draw_text_block(draw, title_lines, title_font, 
-                       (width // 2, title_y), colors["secondary"], 
-                       title_line_height, "center")
-    
-    # Draw divider after title
-    if layout["title_pos"] == "center":
-        divider_y = title_y + title_total_height + 40
-        draw_modern_divider(draw, width // 2 - 100, divider_y, 
-                           width // 2 + 100, divider_y, 
-                           colors["accent"], 3, "line")
-    
-    # Draw verse text
-    if layout["verse_pos"] == "center":
-        verse_y = height // 2 - verse_total_height // 2
+    # Different animations based on emotion
+    if emotion == "Calm":
+        # Breathing animation in center
+        animate_breathing_circle(draw, width//2, height//2, t, colors)
         
-        # Fade in effect for video
-        verse_alpha = int(255 * verse_progress) if is_video else 255
-        verse_color = colors["text"][:3] + (verse_alpha,)
+        # Flowing lines around
+        animate_flowing_line(draw, width//2-100, height//2-50, 
+                           width//2+100, height//2-50, t, colors)
         
-        draw_text_block(draw, verse_lines, verse_font,
-                       (width // 2, verse_y), verse_color,
-                       verse_line_height, "center")
+        # Calm text animation
+        text_x = width//2 - len(verse)*10  # Rough centering
+        text_y = height//2 + 100
+        animate_emotional_text(draw, verse, text_x, text_y, t, font, colors, "Calm")
     
-    elif layout["verse_pos"] == "left":
-        verse_y = height * 0.4
-        verse_alpha = int(255 * verse_progress) if is_video else 255
-        verse_color = colors["text"][:3] + (verse_alpha,)
+    elif emotion == "Hope":
+        # Sunrise animation
+        animate_rising_sun(draw, width, height, t, colors)
         
-        draw_text_block(draw, verse_lines, verse_font,
-                       (80, verse_y), verse_color,
-                       verse_line_height, "left")
-    
-    # Draw reference
-    if reference:
-        ref_lines, ref_line_height, ref_total_height = calculate_text_layout(
-            reference, ref_font, 300, 100
-        )
+        # Growing tree
+        animate_growing_tree(draw, width//2, height-50, t, colors)
         
-        ref_alpha = 255 if not is_video else int(255 * max(0, min(1.0, (t - 4) / 1)))
+        # Hopeful text animation
+        text_x = 100
+        text_y = 100
+        animate_emotional_text(draw, verse, text_x, text_y, t, font, colors, "Hope")
+    
+    elif emotion == "Strength":
+        # Heartbeat animation
+        animate_heartbeat(draw, width//2, height//2, t, colors)
         
-        if ref_alpha > 0:
-            if layout["ref_pos"] == "bottom_right":
-                ref_x = width - 100
-                ref_y = height - 120
-                draw_text_block(draw, ref_lines, ref_font,
-                              (ref_x, ref_y), colors["accent"],
-                              ref_line_height, "right")
-            
-            elif layout["ref_pos"] == "bottom_center":
-                ref_y = height - 100
-                draw_text_block(draw, ref_lines, ref_font,
-                              (width // 2, ref_y), colors["accent"],
-                              ref_line_height, "center")
-            
-            else:  # right
-                ref_x = width - 100
-                ref_y = height * 0.8
-                draw_text_block(draw, ref_lines, ref_font,
-                              (ref_x, ref_y), colors["accent"],
-                              ref_line_height, "right")
-    
-    # Draw brand text
-    if brand_text:
-        brand_alpha = 180
-        if layout["brand_pos"] == "bottom_left":
-            draw.text((60, height - 60), brand_text, 
-                     font=brand_font, fill=colors["text"][:3] + (brand_alpha,))
-        elif layout["brand_pos"] == "bottom_center":
-            if hasattr(brand_font, 'getbbox'):
-                bbox = brand_font.getbbox(brand_text)
-                brand_width = bbox[2] - bbox[0]
-            else:
-                brand_width = brand_font.getsize(brand_text)[0]
-            
-            brand_x = (width - brand_width) // 2
-            draw.text((brand_x, height - 60), brand_text,
-                     font=brand_font, fill=colors["text"][:3] + (brand_alpha,))
-        else:  # bottom_right
-            if hasattr(brand_font, 'getbbox'):
-                bbox = brand_font.getbbox(brand_text)
-                brand_width = bbox[2] - bbox[0]
-            else:
-                brand_width = brand_font.getsize(brand_text)[0]
-            
-            brand_x = width - brand_width - 60
-            draw.text((brand_x, height - 60), brand_text,
-                     font=brand_font, fill=colors["text"][:3] + (brand_alpha,))
-    
-    # Add "Still Mind" watermark (subtle)
-    watermark_font = load_font_safe(font_style, 24)
-    draw.text((30, 30), "STILL MIND", 
-             font=watermark_font, fill=colors["text"][:3] + (100,))
+        # Strong, bold lines
+        for i in range(3):
+            line_y = height//2 + 80 + i*40
+            line_wave = math.sin(t*3 + i) * 20
+            draw.line([(100, line_y + line_wave), (width-100, line_y + line_wave)], 
+                     fill=colors["primary"], width=5)
+        
+        # Strong text animation
+        text_x = 100
+        text_y = height - 150
+        animate_emotional_text(draw, verse, text_x, text_y, t, font, colors, "Strength")
     
     return img
 
 # ============================================================================
-# VIDEO GENERATION
-# ============================================================================
-def create_modern_video(width, height, theme_name, layout_name, font_style,
-                       title_text, verse_text, reference, brand_text):
-    """Create animated flat design video."""
-    duration = 6
-    fps = 24
-    
-    def make_frame(t):
-        img = create_modern_flat_design(
-            width, height, theme_name, layout_name, font_style,
-            title_text, verse_text, reference, brand_text, t, True
-        )
-        return np.array(img.convert("RGB"))
-    
-    clip = VideoClip(make_frame, duration=duration)
-    clip = clip.set_fps(fps)
-    
-    # Create temporary file
-    import tempfile
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-    temp_path = temp_file.name
-    
-    try:
-        clip.write_videofile(
-            temp_path,
-            fps=fps,
-            codec="libx264",
-            audio_codec="aac",
-            verbose=False,
-            logger=None
-        )
-        
-        with open(temp_path, 'rb') as f:
-            video_bytes = f.read()
-        
-        return video_bytes
-    finally:
-        if os.path.exists(temp_path):
-            os.unlink(temp_path)
-
-# ============================================================================
 # STREAMLIT UI
 # ============================================================================
-st.title("✨ Still Mind: Modern Flat Design Studio")
-st.markdown("### Clean typography • Bold colors • Minimalist layouts")
+st.title("💓 Emotional Flat Animation Studio")
+st.markdown("### Animations that create emotional connections")
 
-# Custom CSS
-st.markdown("""
-<style>
-    .stButton > button {
-        background-color: #2C3E50;
-        color: white;
-        border: none;
-        padding: 0.75rem 1.5rem;
-        border-radius: 8px;
-        font-weight: bold;
-        transition: all 0.3s;
-    }
-    .stButton > button:hover {
-        background-color: #1A252F;
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    }
-    .sidebar .sidebar-content {
-        background: linear-gradient(180deg, #1C2833, #2C3E50);
-    }
-    .stTextInput > div > div > input {
-        font-size: 1.1rem;
-        padding: 0.75rem;
-    }
-    .stSelectbox > div > div {
-        font-size: 1rem;
-        padding: 0.5rem;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Emotion selection
+emotion = st.selectbox("Choose Emotional Tone", ["Calm", "Hope", "Strength"])
 
-# Sidebar
-with st.sidebar:
-    st.header("🎨 Design Settings")
-    
-    # Theme selection
-    theme_option = st.selectbox("Color Theme", list(THEMES.keys()))
-    
-    # Layout selection
-    layout_option = st.selectbox("Layout Style", list(LAYOUTS.keys()))
-    
-    # Font selection
-    font_option = st.selectbox("Font Style", list(FONT_STYLES.keys()))
-    
-    # Size selection
-    size_options = {
-        "Instagram (1080x1080)": (1080, 1080),
-        "Stories (1080x1920)": (1080, 1920),
-        "Desktop (1920x1080)": (1920, 1080),
-        "Square (1200x1200)": (1200, 1200)
-    }
-    size_option = st.selectbox("Size Format", list(size_options.keys()))
-    width, height = size_options[size_option]
-    
-    st.divider()
-    
-    st.header("📝 Content")
-    
-    # Title/Header
-    st.subheader("Title Text")
-    title_text = st.text_area("Title (use SHIFT+ENTER for line breaks)", 
-                             "STILL\nMIND", height=100)
-    
-    # Verse text
-    st.subheader("Main Text")
-    verse_text = st.text_area("Verse/Quote (will be auto-wrapped)", 
-                             "Be still, and know that I am God.\nI will be exalted among the nations,\nI will be exalted in the earth.",
-                             height=150)
-    
-    # Reference
-    st.subheader("Reference")
-    reference = st.text_input("Bible Reference or Author", "PSALM 46:10")
-    
-    # Brand/Website
-    brand_text = st.text_input("Brand/Website (optional)", "stillmind.com")
-    
-    st.divider()
-    
-    # Animation preview
-    st.header("⏱️ Animation Preview")
-    time_scrubber = st.slider("Time", 0.0, 6.0, 0.0, 0.1)
+# Verse input
+verse = st.text_area("Inspirational Verse", 
+                    "Be still, and know that I am God.")
 
-# Main content
-col1, col2 = st.columns([2, 1])
+# Time control
+time_slider = st.slider("Animation Time", 0.0, 5.0, 0.0, 0.1)
 
-with col1:
-    # Preview section
-    st.subheader("✨ Live Preview")
-    
-    with st.spinner("Creating modern design..."):
-        preview_img = create_modern_flat_design(
-            width, height, theme_option, layout_option, font_option,
-            title_text, verse_text, reference, brand_text, time_scrubber, False
-        )
-    
-    st.image(preview_img, use_column_width=True)
-    
-    # Action buttons
-    col_btn1, col_btn2 = st.columns(2)
-    
-    with col_btn1:
-        # Download PNG
-        img_buffer = io.BytesIO()
-        preview_img.save(img_buffer, format='PNG', optimize=True, quality=95)
-        
-        st.download_button(
-            label="📥 Download PNG",
-            data=img_buffer.getvalue(),
-            file_name=f"modern_design_{theme_option.lower().replace(' ', '_')}.png",
-            mime="image/png",
-            use_container_width=True
-        )
-    
-    with col_btn2:
-        # Generate video
-        if st.button("🎬 Create Motion Graphic", use_container_width=True):
-            with st.spinner("Animating text reveal..."):
-                video_data = create_modern_video(
-                    width, height, theme_option, layout_option, font_option,
-                    title_text, verse_text, reference, brand_text
-                )
-                
-                if video_data:
-                    st.video(video_data)
-                    
-                    # Video download
-                    st.download_button(
-                        label="📥 Download MP4",
-                        data=video_data,
-                        file_name=f"modern_motion_{theme_option.lower().replace(' ', '_')}.mp4",
-                        mime="video/mp4",
-                        use_container_width=True
-                    )
+# Create and display
+W, H = 1080, 1080
+scene = create_emotional_scene(W, H, emotion, verse, time_slider)
+st.image(scene, use_container_width=True)
 
-with col2:
-    # Design details panel
-    st.subheader("🖼️ Design Details")
+# Video generation
+if st.button("🎬 Create Emotional Animation (5s)"):
+    def make_frame(t):
+        return np.array(create_emotional_scene(W, H, emotion, verse, t, True).convert("RGB"))
     
-    # Show color palette
-    colors = THEMES[theme_option]
-    st.write("**Color Palette:**")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.color_picker("Primary", 
-                       value=f"#{colors['primary'][0]:02x}{colors['primary'][1]:02x}{colors['primary'][2]:02x}",
-                       disabled=True)
-    with col2:
-        st.color_picker("Accent", 
-                       value=f"#{colors['accent'][0]:02x}{colors['accent'][1]:02x}{colors['accent'][2]:02x}",
-                       disabled=True)
-    with col3:
-        st.color_picker("Text", 
-                       value=f"#{colors['text'][0]:02x}{colors['text'][1]:02x}{colors['text'][2]:02x}",
-                       disabled=True)
-    
-    # Layout info
-    st.write("**Layout:**")
-    layout_info = LAYOUTS[layout_option]
-    for key, value in layout_info.items():
-        st.caption(f"{key.replace('_', ' ').title()}: {value}")
-    
-    # Font info
-    st.write("**Typography:**")
-    font_config = FONT_STYLES[font_option]
-    st.caption(f"Font: {font_option}")
-    st.caption(f"Spacing: {font_config['spacing']}")
-    
-    # Statistics
-    st.write("**Image Stats:**")
-    st.metric("Resolution", f"{width} × {height}")
-    st.metric("Theme", theme_option)
-    
-    st.divider()
-    
-    # Social media caption generator
-    st.subheader("📱 Social Media")
-    
-    caption = f"""{title_text}
-
-{verse_text[:100]}...
-
-{reference}
-
-👉 {brand_text if brand_text else 'stillmind.com'}
-
-#StillMind #Faith #Inspiration #Design #Typography"""
-    
-    st.text_area("Social Media Caption", caption, height=180)
-    
-    if st.button("📋 Copy Caption", use_container_width=True):
-        st.code(caption)
-        st.success("Copied!")
-    
-    st.divider()
-    
-    # Quick templates
-    st.subheader("⚡ Quick Templates")
-    
-    if st.button("Psalm 23 Template", use_container_width=True):
-        st.session_state.title_text = "THE LORD\nIS MY\nSHEPHERD"
-        st.session_state.verse_text = "I shall not want. He makes me lie down in green pastures, he leads me beside quiet waters, he refreshes my soul."
-        st.session_state.reference = "PSALM 23:1-3"
-        st.rerun()
-    
-    if st.button("Be Still Template", use_container_width=True):
-        st.session_state.title_text = "BE\nSTILL"
-        st.session_state.verse_text = "And know that I am God. I will be exalted among the nations, I will be exalted in the earth."
-        st.session_state.reference = "PSALM 46:10"
-        st.rerun()
-
-# Footer
-st.divider()
-st.markdown("""
-<div style='text-align: center; color: #7F8C8D; font-size: 0.9rem;'>
-    <p>✨ Modern Flat Design Studio • Inspired by clean typography and minimalist aesthetics</p>
-    <p>Create beautiful scripture graphics for social media, presentations, and personal use</p>
-</div>
-""", unsafe_allow_html=True)
-
-# Cleanup temporary files
-for file in os.listdir("."):
-    if file.startswith("temp_") and file.endswith(".mp4"):
-        try:
-            if time.time() - os.path.getctime(file) > 300:  # 5 minutes old
-                os.remove(file)
-        except:
-            pass
+    clip = VideoClip(make_frame, duration=5).set_fps(24)
+    clip.write_videofile("emotional_animation.mp4", codec="libx264", logger=None)
+    st.video("emotional_animation.mp4")
