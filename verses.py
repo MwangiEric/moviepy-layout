@@ -1,818 +1,751 @@
 import streamlit as st
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-import io, os, requests, math, time, json
+from PIL import Image, ImageDraw, ImageFont
+import io, os, math, time, random, requests
 import numpy as np
-from moviepy.editor import VideoClip, CompositeVideoClip, AudioFileClip
+from moviepy.editor import VideoClip
 import tempfile
+from groq import Groq
 
 # ============================================================================
-# STREAMLIT SETUP
+# STREAMLIT CONFIGURATION
 # ============================================================================
 st.set_page_config(
-    page_title="Still Mind Pro", 
-    page_icon="✝️", 
+    page_title="Scripture Motion Pro",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# Modern UI Styling
+st.markdown("""
+<style>
+    .main .block-container {padding-top: 1rem;}
+    .stButton > button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        font-weight: 600;
+        transition: all 0.3s;
+    }
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+    }
+    .ai-feature {background: linear-gradient(135deg, #00C9FF 0%, #92FE9D 100%); color: black; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem;}
+    .emotion-badge {display: inline-block; padding: 3px 12px; border-radius: 15px; font-size: 0.8rem; font-weight: bold;}
+</style>
+""", unsafe_allow_html=True)
+
 # ============================================================================
-# ENHANCED THEME SYSTEM
+# EMOTIONAL FLAT DESIGN SYSTEM
 # ============================================================================
-COLORS = {
-    "Premium Green": {
-        "bg": [(10, 30, 50, 255), (20, 50, 80, 255)],  # Dark blue gradient
-        "accent": (76, 175, 80, 255),  # Bright green
-        "secondary": (120, 200, 120, 255),  # Light green
-        "text": (255, 255, 255, 255),
-        "glow": (76, 175, 80, 160),
-        "gradient_type": "vertical"
+EMOTIONAL_THEMES = {
+    "Morning Calm": {
+        "emotion": "calm",
+        "colors": {
+            "bg": (240, 248, 255, 255),      # Alice Blue
+            "primary": (100, 149, 237, 255),  # Cornflower Blue
+            "secondary": (135, 206, 250, 255), # Light Sky Blue
+            "accent": (255, 255, 255, 255),   # White
+            "text": (25, 25, 112, 255)       # Midnight Blue
+        },
+        "animation": "breathing_circles"
     },
-    "Ocean Deep": {
-        "bg": [(10, 40, 70, 255), (20, 60, 100, 255)],
-        "accent": (0, 200, 200, 255),  # Cyan
-        "secondary": (100, 220, 255, 255),
-        "text": (255, 255, 255, 255),
-        "glow": (0, 200, 200, 140),
-        "gradient_type": "radial"
+    "Golden Hope": {
+        "emotion": "hope",
+        "colors": {
+            "bg": (255, 248, 225, 255),      # Light Gold
+            "primary": (255, 193, 7, 255),    # Amber
+            "secondary": (255, 224, 130, 255),# Light Amber
+            "accent": (255, 255, 255, 255),
+            "text": (139, 69, 19, 255)       # Saddle Brown
+        },
+        "animation": "sunrise_rays"
     },
-    "Sunset Gold": {
-        "bg": [(40, 20, 50, 255), (80, 40, 30, 255)],
-        "accent": (255, 195, 0, 255),  # Gold
-        "secondary": (255, 220, 120, 255),
-        "text": (255, 255, 255, 255),
-        "glow": (255, 195, 0, 180),
-        "gradient_type": "horizontal"
+    "Night Stillness": {
+        "emotion": "stillness",
+        "colors": {
+            "bg": (10, 15, 30, 255),         # Deep Night
+            "primary": (123, 104, 238, 255),  # Medium Slate Blue
+            "secondary": (186, 85, 211, 255), # Medium Orchid
+            "accent": (255, 255, 255, 200),
+            "text": (240, 248, 255, 255)     # Alice Blue
+        },
+        "animation": "twinkling_stars"
     },
-    "Midnight Purple": {
-        "bg": [(20, 10, 40, 255), (40, 20, 60, 255)],
-        "accent": (180, 100, 255, 255),  # Purple
-        "secondary": (220, 180, 255, 255),
-        "text": (255, 255, 255, 255),
-        "glow": (180, 100, 255, 160),
-        "gradient_type": "diagonal"
+    "Forest Peace": {
+        "emotion": "peace",
+        "colors": {
+            "bg": (240, 255, 240, 255),      # Honeydew
+            "primary": (34, 139, 34, 255),    # Forest Green
+            "secondary": (152, 251, 152, 255), # Pale Green
+            "accent": (255, 255, 255, 255),
+            "text": (0, 51, 0, 255)          # Dark Green
+        },
+        "animation": "swaying_trees"
     }
 }
 
-SIZES = {
-    "TikTok (1080x1920)": (1080, 1920),
-    "Instagram (1080x1080)": (1080, 1080),
-    "YouTube (1920x1080)": (1920, 1080),
-    "Stories (1080x1350)": (1080, 1350),
-    "Desktop (1920x1200)": (1920, 1200)
-}
-
-ANIMATION_STYLES = ["None", "Typewriter", "Fade In", "Scroll Up", "Word by Word"]
-BACKGROUND_STYLES = ["Premium Gradient", "Particles", "Geometric", "Abstract", "Solid"]
-TEXT_EFFECTS = ["None", "Shadow", "Glow", "Outline", "Emboss"]
-
 # ============================================================================
-# ADVANCED FONT MANAGEMENT
+# GROQ AI INTEGRATION
 # ============================================================================
-@st.cache_resource
-def get_font_paths():
-    """Discover available fonts on the system."""
-    font_paths = []
-    
-    # Common font directories
-    common_paths = [
-        "/usr/share/fonts/",
-        "/usr/local/share/fonts/",
-        "C:/Windows/Fonts/",
-        "/Library/Fonts/",
-        "/System/Library/Fonts/",
-        os.path.expanduser("~/Library/Fonts/"),
-    ]
-    
-    for path in common_paths:
-        if os.path.exists(path):
-            for root, dirs, files in os.walk(path):
-                for file in files:
-                    if file.lower().endswith(('.ttf', '.otf')):
-                        font_paths.append(os.path.join(root, file))
-    
-    return font_paths
-
-@st.cache_resource
-def load_font_with_fallback(size=60, bold=False, italic=False):
-    """Intelligent font loader with multiple fallbacks."""
-    font_paths = get_font_paths()
-    
-    # Priority fonts to look for
-    preferred_fonts = []
-    
-    if bold and italic:
-        preferred_fonts.extend([
-            "arialbi.ttf", "Arial-BoldItalic.ttf", "Helvetica-BoldOblique.ttf",
-            "DejaVuSans-BoldOblique.ttf", "Roboto-BoldItalic.ttf", "Montserrat-BoldItalic.ttf"
-        ])
-    elif bold:
-        preferred_fonts.extend([
-            "arialbd.ttf", "Arial-Bold.ttf", "Helvetica-Bold.ttf",
-            "DejaVuSans-Bold.ttf", "Roboto-Bold.ttf", "Montserrat-Bold.ttf",
-            "Lato-Bold.ttf", "OpenSans-Bold.ttf"
-        ])
-    elif italic:
-        preferred_fonts.extend([
-            "ariali.ttf", "Arial-Italic.ttf", "Helvetica-Oblique.ttf",
-            "DejaVuSans-Oblique.ttf", "Roboto-Italic.ttf", "Montserrat-Italic.ttf"
-        ])
-    else:
-        preferred_fonts.extend([
-            "arial.ttf", "Arial.ttf", "Helvetica.ttf", "Helvetica Neue.ttf",
-            "DejaVuSans.ttf", "Roboto-Regular.ttf", "Montserrat-Regular.ttf",
-            "Lato-Regular.ttf", "OpenSans-Regular.ttf", "SegoeUI.ttf"
-        ])
-    
-    # Try preferred fonts first
-    for font_name in preferred_fonts:
-        for font_path in font_paths:
-            if font_name.lower() in font_path.lower():
-                try:
-                    return ImageFont.truetype(font_path, size)
-                except:
-                    continue
-    
-    # Try any font
-    for font_path in font_paths:
-        try:
-            return ImageFont.truetype(font_path, size)
-        except:
-            continue
-    
-    # Ultimate fallback
-    return ImageFont.load_default()
-
-# ============================================================================
-# ENHANCED BACKGROUND GENERATORS
-# ============================================================================
-def create_premium_background(width, height, colors, time_offset=0):
-    """Create premium gradient background with animated elements."""
-    img = Image.new("RGBA", (width, height))
-    draw = ImageDraw.Draw(img)
-    
-    color1, color2 = colors["bg"]
-    gradient_type = colors.get("gradient_type", "vertical")
-    
-    if gradient_type == "vertical":
-        # Vertical gradient with subtle movement
-        for y in range(height):
-            ratio = y / height
-            # Add wave effect
-            wave = math.sin(y / 100 + time_offset) * 0.08
-            ratio = max(0, min(1, ratio + wave))
-            
-            r = int((1-ratio) * color1[0] + ratio * color2[0])
-            g = int((1-ratio) * color1[1] + ratio * color2[1])
-            b = int((1-ratio) * color1[2] + ratio * color2[2])
-            a = int((1-ratio) * color1[3] + ratio * color2[3])
-            draw.line([(0, y), (width, y)], fill=(r, g, b, a))
-    
-    elif gradient_type == "radial":
-        # Radial gradient from center
-        center_x, center_y = width // 2, height // 2
-        max_dist = math.sqrt(center_x**2 + center_y**2)
-        
-        for y in range(height):
-            for x in range(width):
-                dist = math.sqrt((x - center_x)**2 + (y - center_y)**2) / max_dist
-                ratio = dist * 0.8  # Soften gradient
-                
-                r = int((1-ratio) * color1[0] + ratio * color2[0])
-                g = int((1-ratio) * color1[1] + ratio * color2[1])
-                b = int((1-ratio) * color1[2] + ratio * color2[2])
-                draw.point((x, y), (r, g, b))
-    
-    # Add subtle noise for texture
-    noise = np.random.randint(0, 10, (height, width, 3), dtype=np.uint8)
-    noise_img = Image.fromarray(noise, mode='RGB').convert('RGBA')
-    noise_img.putalpha(5)  # Very subtle
-    img = Image.alpha_composite(img, noise_img)
-    
-    return img
-
-def create_particle_background(width, height, colors, time_offset=0):
-    """Create animated particle background."""
-    img = Image.new("RGBA", (width, height), (0, 0, 0, 255))
-    draw = ImageDraw.Draw(img)
-    
-    # Base gradient
-    for y in range(height):
-        ratio = y / height
-        r = int((1-ratio) * colors["bg"][0][0] + ratio * colors["bg"][1][0])
-        g = int((1-ratio) * colors["bg"][0][1] + ratio * colors["bg"][1][1])
-        b = int((1-ratio) * colors["bg"][0][2] + ratio * colors["bg"][1][2])
-        draw.line([(0, y), (width, y)], fill=(r, g, b, 255))
-    
-    # Animated particles
-    for i in range(120):  # More particles
-        # Circular motion
-        angle = time_offset * 2 + i * 0.5
-        radius = 0.3 + 0.2 * math.sin(i * 0.3)
-        
-        x = width * (0.5 + radius * math.cos(angle))
-        y = height * (0.5 + radius * math.sin(angle + i * 0.2))
-        
-        # Size and opacity variations
-        size = 2 + int(4 * math.sin(time_offset + i * 0.5))
-        opacity = int(80 + 100 * abs(math.sin(time_offset * 3 + i)))
-        
-        # Color variations
-        r = colors["accent"][0] + int(30 * math.sin(i))
-        g = colors["accent"][1] + int(30 * math.cos(i))
-        b = colors["accent"][2]
-        particle_color = (r, g, b, opacity)
-        
-        draw.ellipse([x-size, y-size, x+size, y+size], 
-                    fill=particle_color, 
-                    outline=colors["accent"][:3] + (opacity//2,))
-    
-    return img
-
-# ============================================================================
-# PREMIUM DECORATION FUNCTIONS (From first code)
-# ============================================================================
-def draw_premium_decorations(draw, x1, y1, x2, y2, colors, time_offset=0):
-    """Draw premium corner brackets with pulsing glow."""
-    # Main box with transparency
-    draw.rectangle([x1, y1, x2, y2], fill=(0, 0, 0, 160))
-    
-    # Pulsing effect
-    pulse = 0.6 + 0.4 * abs(math.sin(time_offset * 2.5))
-    
-    # Enhanced bracket parameters
-    bracket_length = 60
-    bracket_thickness = 5
-    
-    def draw_bracket_corner(cx, cy, dx, dy, width, color):
-        # Horizontal arm
-        draw.line([(cx, cy), (cx + dx, cy)], 
-                 fill=color, width=width, joint="curve")
-        # Vertical arm
-        draw.line([(cx, cy), (cx, cy + dy)], 
-                 fill=color, width=width, joint="curve")
-    
-    # Multi-layered glow effect
-    for layer in range(3, 0, -1):
-        current_width = bracket_thickness + (layer * 6)
-        
-        if layer == 1:
-            # Inner layer - solid color
-            color = colors["accent"]
-        else:
-            # Outer layers - glow effect
-            glow_strength = 180 - (layer * 50)
-            color = colors["accent"][:3] + (int(glow_strength * pulse),)
-        
-        # Draw all four corners
-        draw_bracket_corner(x1, y1, bracket_length, bracket_length, 
-                          current_width, color)  # Top-left
-        draw_bracket_corner(x2, y1, -bracket_length, bracket_length, 
-                          current_width, color)  # Top-right
-        draw_bracket_corner(x1, y2, bracket_length, -bracket_length, 
-                          current_width, color)  # Bottom-left
-        draw_bracket_corner(x2, y2, -bracket_length, -bracket_length, 
-                          current_width, color)  # Bottom-right
-    
-    # Subtle inner border
-    draw.rectangle([x1+20, y1+20, x2-20, y2-20], 
-                  outline=colors["accent"][:3] + (60,), 
-                  width=2)
-
-# ============================================================================
-# SMART TEXT RENDERING WITH EFFECTS
-# ============================================================================
-def draw_text_with_effects(draw, text, position, font, colors, effect="None"):
-    """Draw text with various visual effects."""
-    x, y = position
-    main_color = colors["text"]
-    accent_color = colors["accent"]
-    
-    if effect == "Shadow":
-        # Shadow effect
-        shadow_offset = 5
-        draw.text((x + shadow_offset, y + shadow_offset), 
-                 text, font=font, fill=(0, 0, 0, 150))
-        draw.text(position, text, font=font, fill=main_color)
-    
-    elif effect == "Glow":
-        # Glow effect (multiple layers)
-        glow_color = accent_color[:3] + (100,)
-        for offset in [(0, 2), (0, -2), (2, 0), (-2, 0),
-                      (2, 2), (2, -2), (-2, 2), (-2, -2)]:
-            draw.text((x + offset[0], y + offset[1]), 
-                     text, font=font, fill=glow_color)
-        draw.text(position, text, font=font, fill=main_color)
-    
-    elif effect == "Outline":
-        # Outline effect
-        outline_color = accent_color[:3] + (200,)
-        for offset in [(0, 3), (0, -3), (3, 0), (-3, 0)]:
-            draw.text((x + offset[0], y + offset[1]), 
-                     text, font=font, fill=outline_color)
-        draw.text(position, text, font=font, fill=main_color)
-    
-    else:
-        # Normal text
-        draw.text(position, text, font=font, fill=main_color)
-
-# ============================================================================
-# ADVANCED VERSE FETCHING WITH CACHING
-# ============================================================================
-@st.cache_data(ttl=3600)
-def fetch_bible_verse(book, chapter, verse):
-    """Fetch verse with multiple fallback options."""
+def get_groq_client():
+    """Initialize Groq client"""
     try:
-        # Try primary API
-        url = f"https://bible-api.com/{book}+{chapter}:{verse}"
-        response = requests.get(url, timeout=5)
+        if hasattr(st, 'secrets') and 'groq_key' in st.secrets:
+            return Groq(api_key=st.secrets.groq_key)
+        return None
+    except:
+        return None
+
+def generate_ai_hook(verse, theme, emotion):
+    """Generate creative title using AI"""
+    client = get_groq_client()
+    if not client:
+        fallbacks = {
+            "calm": ["BE STILL", "INNER PEACE", "QUIET SOUL"],
+            "hope": ["NEW DAWN", "PROMISE RISING", "HOPE AWAITS"],
+            "stillness": ["NIGHT WATCH", "STARLIT", "MOONLIGHT"],
+            "peace": ["FOREST PATH", "GREEN PASTURES", "STILL WATERS"]
+        }
+        return random.choice(fallbacks.get(emotion, ["STILL MIND"]))
+    
+    try:
+        prompt = f"""Create a powerful 1-3 word title for scripture graphic.
+        Verse: {verse[:80]}
+        Theme: {theme}
+        Emotion: {emotion}
         
-        if response.status_code == 200:
-            data = response.json()
-            if "text" in data:
-                text = data["text"].replace("\n", " ").strip()
-                return text, data.get("reference", f"{book} {chapter}:{verse}")
+        Requirements:
+        - 1-3 words, ALL CAPS
+        - No punctuation
+        - Evokes {emotion} emotion
+        - Modern, minimal
+        
+        Title:"""
+        
+        response = client.chat.completions.create(
+            model="mixtral-8x7b-32768",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=20,
+            temperature=0.7
+        )
+        
+        hook = response.choices[0].message.content.strip().upper()
+        hook = hook.replace('"', '').replace("'", "").replace(".", "")
+        return hook[:30]  # Limit length
+    except:
+        return "STILL MIND"
+
+def generate_ai_caption(hook, verse, ref, theme, emotion):
+    """Generate social media caption using AI"""
+    client = get_groq_client()
+    if not client:
+        return f"""{hook}
+
+{verse[:100]}...
+
+📖 {ref}
+
+#Scripture #{emotion.title()} #{theme.replace(' ', '')}"""
     
-    except requests.exceptions.Timeout:
-        st.warning("API timeout. Using cached verse.")
-    
-    # Fallback verses
-    fallback_verses = {
-        "Psalm": "The Lord is my shepherd; I shall not want.",
-        "Matthew": "Come to me, all who labor and are heavy laden, and I will give you rest.",
-        "John": "For God so loved the world, that he gave his only Son.",
-        "Romans": "For I am not ashamed of the gospel, for it is the power of God for salvation.",
-        "Ephesians": "For by grace you have been saved through faith.",
-        "Philippians": "Rejoice in the Lord always; again I will say, rejoice.",
-        "James": "Count it all joy, my brothers, when you meet trials of various kinds."
-    }
-    
-    default = fallback_verses.get(book, "God is our refuge and strength, an ever-present help in trouble.")
-    return default, f"{book} {chapter}:{verse}"
+    try:
+        prompt = f"""Generate TikTok caption for scripture graphic.
+        
+        Hook: {hook}
+        Verse: {verse}
+        Reference: {ref}
+        Theme: {theme}
+        Emotion: {emotion}
+        
+        Include:
+        1. Hook (1 line)
+        2. Verse excerpt (short)
+        3. Reference
+        4. Call to action (Save, Share, Tag)
+        5. 3-5 hashtags
+        
+        Keep under 220 characters.
+        
+        Caption:"""
+        
+        response = client.chat.completions.create(
+            model="mixtral-8x7b-32768",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=150,
+            temperature=0.7
+        )
+        
+        return response.choices[0].message.content.strip()
+    except:
+        return f"""{hook}
+
+{verse[:100]}...
+
+📖 {ref}
+
+#Scripture #{emotion.title()} #{theme.replace(' ', '')}"""
 
 # ============================================================================
-# IMAGE GENERATION ENGINE
+# ANIMATED FLAT BACKGROUND ENGINE
 # ============================================================================
-def create_still_image(width, height, colors, book, chapter, verse, hook, 
-                      bg_style="Premium Gradient", text_effect="None"):
-    """Create high-quality static image."""
-    # Create background
-    if bg_style == "Premium Gradient":
-        img = create_premium_background(width, height, colors)
-    elif bg_style == "Particles":
-        img = create_particle_background(width, height, colors)
-    else:
-        img = create_premium_background(width, height, colors)
+def create_animated_background(width, height, theme_name, time_offset=0):
+    """Create flat design animated background"""
+    theme = EMOTIONAL_THEMES[theme_name]
+    colors = theme["colors"]
     
+    img = Image.new("RGBA", (width, height), colors["bg"])
     draw = ImageDraw.Draw(img)
     
-    # Fetch verse
-    verse_text, reference = fetch_bible_verse(book, chapter, verse)
+    if theme["animation"] == "breathing_circles":
+        # Animated breathing circles
+        for i in range(12):
+            x = width // 2 + math.cos(i * math.pi/6) * 300
+            y = height // 2 + math.sin(i * math.pi/6) * 300
+            
+            breath = math.sin(time_offset * 2 + i) * 0.3 + 0.7
+            size = 40 * breath
+            
+            # Draw flat circle with outline
+            draw.ellipse([x-size, y-size, x+size, y+size],
+                        outline=colors["primary"], width=3)
+            
+            # Inner dot
+            dot_size = 8 + math.sin(time_offset * 3 + i) * 3
+            draw.ellipse([x-dot_size, y-dot_size, x+dot_size, y+dot_size],
+                        fill=colors["secondary"])
     
-    # Calculate layout
-    box_width = width - 200
-    box_height = height - 400
-    box_x = 100
-    box_y = (height - box_height) // 2
-    
-    # Draw premium box
-    draw_premium_decorations(draw, box_x, box_y, box_x + box_width, 
-                           box_y + box_height, colors)
-    
-    # Font sizes (larger)
-    hook_font = load_font_with_fallback(85, bold=True)
-    verse_font = load_font_with_fallback(60, bold=False)
-    ref_font = load_font_with_fallback(48, bold=True)
-    
-    # Hook text (top)
-    if hook:
-        hook_bbox = hook_font.getbbox(hook)
-        hook_width = hook_bbox[2] - hook_bbox[0]
-        hook_x = (width - hook_width) // 2
-        hook_y = box_y - 150
+    elif theme["animation"] == "sunrise_rays":
+        # Sunrise with animated rays
+        sun_x, sun_y = width // 2, height * 0.3
+        sun_size = 70 + math.sin(time_offset) * 10
         
-        draw_text_with_effects(draw, hook.upper(), (hook_x, hook_y), 
-                             hook_font, colors, text_effect)
+        # Sun
+        draw.ellipse([sun_x-sun_size, sun_y-sun_size, 
+                     sun_x+sun_size, sun_y+sun_size],
+                    fill=colors["primary"])
+        
+        # Rays
+        for i in range(16):
+            angle = i * math.pi / 8 + time_offset
+            length = 100 + math.sin(time_offset * 2 + i) * 30
+            end_x = sun_x + length * math.cos(angle)
+            end_y = sun_y + length * math.sin(angle)
+            
+            ray_width = 6 + math.sin(time_offset * 3 + i) * 2
+            draw.line([(sun_x, sun_y), (end_x, end_y)],
+                     fill=colors["secondary"], width=int(ray_width))
     
-    # Wrap verse text
-    words = verse_text.split()
+    elif theme["animation"] == "twinkling_stars":
+        # Twinkling stars
+        for i in range(80):
+            x = (i * 731) % width
+            y = (i * 521) % (height * 0.8)
+            
+            twinkle = math.sin(time_offset * 4 + i) * 0.5 + 0.5
+            size = 1 + int(3 * twinkle)
+            alpha = int(200 * twinkle)
+            
+            draw.ellipse([x-size, y-size, x+size, y+size],
+                        fill=colors["accent"][:3] + (alpha,))
+        
+        # Crescent moon
+        moon_x, moon_y = width * 0.8, height * 0.2
+        moon_size = 50
+        draw.ellipse([moon_x-moon_size, moon_y-moon_size,
+                     moon_x+moon_size, moon_y+moon_size],
+                    fill=colors["secondary"][:3] + (80,))
+        draw.ellipse([moon_x-moon_size//2, moon_y-moon_size//2,
+                     moon_x+moon_size//2, moon_y+moon_size//2],
+                    fill=colors["bg"])
+    
+    elif theme["animation"] == "swaying_trees":
+        # Swaying flat trees
+        tree_count = 8
+        for i in range(tree_count):
+            tree_x = width * (0.1 + 0.8 * i/(tree_count-1))
+            tree_y = height * 0.7
+            
+            sway = math.sin(time_offset * 0.5 + i) * 15
+            tree_x += sway
+            
+            # Trunk
+            trunk_width = 18
+            trunk_height = 100
+            draw.rectangle([tree_x-trunk_width//2, tree_y,
+                           tree_x+trunk_width//2, tree_y-trunk_height],
+                          fill=(101, 67, 33, 255))
+            
+            # Canopy (3 circles)
+            for j in range(3):
+                canopy_size = 45 - j * 10
+                canopy_y = tree_y - trunk_height + j * 30
+                sway_offset = math.sin(time_offset + i + j) * 5
+                draw.ellipse([tree_x-canopy_size, canopy_y+sway_offset-canopy_size,
+                             tree_x+canopy_size, canopy_y+sway_offset+canopy_size],
+                            fill=colors["primary"][:3] + (220 - j*50,))
+    
+    # Add subtle grid
+    grid_spacing = 80
+    alpha = 15
+    for x in range(0, width, grid_spacing):
+        offset = (time_offset * 20) % grid_spacing
+        draw.line([(x+offset, 0), (x+offset, height)],
+                 fill=(255, 255, 255, alpha), width=1)
+    
+    return img
+
+# ============================================================================
+# KINETIC TYPOGRAPHY
+# ============================================================================
+def draw_kinetic_text(draw, text, x, y, font_size, color, time_offset, style="fade"):
+    """Draw text with kinetic animations"""
+    try:
+        font = ImageFont.truetype("arialbd.ttf", font_size)
+    except:
+        font = ImageFont.load_default(font_size)
+    
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_width = bbox[2] - bbox[0]
+    actual_x = x - text_width // 2
+    
+    if style == "fade":
+        # Fade in
+        alpha = min(255, int(time_offset * 100))
+        draw.text((actual_x, y), text, font=font, fill=color[:3] + (alpha,))
+    
+    elif style == "typewriter":
+        # Typewriter reveal
+        chars = int(len(text) * min(1.0, time_offset * 2))
+        visible = text[:chars]
+        draw.text((actual_x, y), visible, font=font, fill=color)
+        
+        # Blinking cursor
+        if chars < len(text) and int(time_offset * 3) % 2 == 0:
+            cursor_x = actual_x + draw.textbbox((0, 0), visible, font=font)[2]
+            cursor_y = y + 5
+            draw.line([(cursor_x, cursor_y), (cursor_x, cursor_y+font_size-10)],
+                     fill=color, width=4)
+    
+    elif style == "float":
+        # Floating animation
+        float_y = y + math.sin(time_offset * 2) * 5
+        draw.text((actual_x, float_y), text, font=font, fill=color)
+    
+    elif style == "pulse":
+        # Pulsing size
+        pulse = math.sin(time_offset * 3) * 0.1 + 1.0
+        pulse_size = int(font_size * pulse)
+        
+        try:
+            pulse_font = ImageFont.truetype("arialbd.ttf", pulse_size)
+        except:
+            pulse_font = ImageFont.load_default(pulse_size)
+        
+        bbox = pulse_font.getbbox(text)
+        text_width = bbox[2] - bbox[0]
+        actual_x = x - text_width // 2
+        
+        draw.text((actual_x, y), text, font=pulse_font, fill=color)
+    
+    return text_width
+
+# ============================================================================
+# MAIN COMPOSITION ENGINE
+# ============================================================================
+def create_scripture_design(width, height, theme_name, hook, verse, ref, time_offset=0):
+    """Create complete scripture design"""
+    theme = EMOTIONAL_THEMES[theme_name]
+    colors = theme["colors"]
+    
+    # Create background
+    img = create_animated_background(width, height, theme_name, time_offset)
+    draw = ImageDraw.Draw(img)
+    
+    center_x, center_y = width // 2, height // 2
+    
+    # Draw hook/title (top)
+    hook_y = height * 0.15
+    hook_font_size = 90 if len(hook) < 15 else 70
+    draw_kinetic_text(draw, hook, center_x, hook_y,
+                     hook_font_size, colors["primary"], 
+                     max(0, time_offset), "pulse")
+    
+    # Draw verse (middle)
+    verse_font_size = 56
+    max_line_width = width - 200
+    
+    # Simple text wrapping
+    words = verse.split()
     lines = []
     current_line = []
     
     for word in words:
         test_line = ' '.join(current_line + [word])
-        bbox = verse_font.getbbox(test_line)
-        if bbox[2] - bbox[0] <= box_width - 100:
-            current_line.append(word)
-        else:
-            lines.append(' '.join(current_line))
+        if len(test_line) > 40:  # Character limit
+            if current_line:
+                lines.append(' '.join(current_line))
             current_line = [word]
+        else:
+            current_line.append(word)
     
     if current_line:
         lines.append(' '.join(current_line))
     
-    # Draw verse text
-    line_height = verse_font.getbbox("A")[3] * 1.4
-    start_y = box_y + 100
+    # Draw lines with staggered animation
+    line_spacing = 75
+    verse_start_y = center_y - (len(lines) - 1) * line_spacing // 2
     
     for i, line in enumerate(lines):
-        bbox = verse_font.getbbox(line)
-        line_width = bbox[2] - bbox[0]
-        x = (width - line_width) // 2
+        line_y = verse_start_y + i * line_spacing
+        line_time = max(0, time_offset - 0.5 - i * 0.2)
+        draw_kinetic_text(draw, line, center_x, line_y,
+                         verse_font_size, colors["text"], 
+                         line_time, "typewriter")
+    
+    # Draw reference (bottom)
+    if ref:
+        ref_font_size = 48
+        ref_y = height * 0.85
+        ref_time = max(0, time_offset - 2)
         
-        draw_text_with_effects(draw, line, (x, start_y + i * line_height), 
-                             verse_font, colors, text_effect)
+        # Reference background
+        ref_font = ImageFont.load_default(ref_font_size)
+        bbox = ref_font.getbbox(ref.upper())
+        ref_width = bbox[2] - bbox[0]
+        
+        # Animated background
+        bg_alpha = int(200 * min(1.0, ref_time * 2))
+        padding = 25
+        draw.rounded_rectangle(
+            [center_x - ref_width//2 - padding,
+             ref_y - padding,
+             center_x + ref_width//2 + padding,
+             ref_y + bbox[3] - bbox[1] + padding],
+            radius=15,
+            fill=colors["primary"][:3] + (bg_alpha,)
+        )
+        
+        # Reference text
+        text_alpha = int(255 * min(1.0, ref_time * 2))
+        draw.text((center_x - ref_width//2, ref_y), ref.upper(),
+                 font=ref_font, fill=colors["accent"][:3] + (text_alpha,))
     
-    # Reference (bottom right)
-    ref_bbox = ref_font.getbbox(reference)
-    ref_x = box_x + box_width - (ref_bbox[2] - ref_bbox[0]) - 50
-    ref_y = box_y + box_height + 50
-    
-    draw_text_with_effects(draw, reference, (ref_x, ref_y), 
-                         ref_font, colors, "Glow")
-    
-    # Brand watermark (subtle)
-    brand_font = load_font_with_fallback(40, bold=True)
-    draw.text((width - 250, 30), "STILL MIND", 
-             font=brand_font, fill=colors["accent"][:3] + (180,))
+    # Watermark (subtle)
+    watermark_font = ImageFont.load_default(28)
+    draw.text((width - 180, height - 50), "@scripture.motion",
+             font=watermark_font, fill=colors["text"][:3] + (100,))
     
     return img
 
 # ============================================================================
-# VIDEO GENERATION ENGINE
+# VIDEO GENERATION
 # ============================================================================
-def create_animated_video(width, height, colors, book, chapter, verse, hook, 
-                         bg_style="Premium Gradient", animation_style="Typewriter"):
-    """Create animated video with chosen effects."""
-    duration = 8  # Slightly longer for better pacing
-    fps = 24  # Smoother animation
+def create_scripture_video(width, height, theme_name, hook, verse, ref):
+    """Create video with animated scripture"""
+    duration = 7  # Optimal for TikTok
+    fps = 30
     
     def make_frame(t):
-        # Create background
-        if bg_style == "Premium Gradient":
-            img = create_premium_background(width, height, colors, t)
-        elif bg_style == "Particles":
-            img = create_particle_background(width, height, colors, t)
-        else:
-            img = create_premium_background(width, height, colors, t)
-        
-        draw = ImageDraw.Draw(img)
-        
-        # Get verse
-        verse_text, reference = fetch_bible_verse(book, chapter, verse)
-        
-        # Box dimensions
-        box_width = width - 200
-        box_height = height - 400
-        box_x = 100
-        box_y = (height - box_height) // 2
-        
-        # Animated decorations
-        draw_premium_decorations(draw, box_x, box_y, box_x + box_width, 
-                               box_y + box_height, colors, t)
-        
-        # Fonts
-        hook_font = load_font_with_fallback(85, bold=True)
-        verse_font = load_font_with_fallback(60, bold=False)
-        ref_font = load_font_with_fallback(48, bold=True)
-        
-        # Animate hook
-        if hook and t > 0.5:
-            hook_alpha = min(255, int((t - 0.5) * 510))
-            hook_bbox = hook_font.getbbox(hook.upper())
-            hook_width = hook_bbox[2] - hook_bbox[0]
-            hook_x = (width - hook_width) // 2
-            hook_y = box_y - 150
-            
-            draw.text((hook_x, hook_y), hook.upper(), 
-                     font=hook_font, 
-                     fill=colors["accent"][:3] + (hook_alpha,))
-        
-        # Animate verse text
-        if animation_style == "Typewriter":
-            # Typewriter effect
-            reveal_time = 5  # seconds to reveal all text
-            progress = min(1.0, t / reveal_time)
-            visible_chars = int(len(verse_text) * progress)
-            
-            words = verse_text[:visible_chars].split()
-            lines = []
-            current_line = []
-            
-            for word in words:
-                test_line = ' '.join(current_line + [word])
-                bbox = verse_font.getbbox(test_line)
-                if bbox[2] - bbox[0] <= box_width - 100:
-                    current_line.append(word)
-                else:
-                    lines.append(' '.join(current_line))
-                    current_line = [word]
-            
-            if current_line:
-                lines.append(' '.join(current_line))
-            
-            line_height = verse_font.getbbox("A")[3] * 1.4
-            start_y = box_y + 100
-            
-            for i, line in enumerate(lines):
-                bbox = verse_font.getbbox(line)
-                line_width = bbox[2] - bbox[0]
-                x = (width - line_width) // 2
-                draw.text((x, start_y + i * line_height), line, 
-                         font=verse_font, fill=colors["text"])
-            
-            # Blinking cursor
-            if progress < 1.0 and int(t * 3) % 2 == 0:
-                if lines:
-                    last_line = lines[-1]
-                    bbox = verse_font.getbbox(last_line)
-                    cursor_x = (width - bbox[0]) // 2 + bbox[2] + 10
-                    cursor_y = start_y + (len(lines) - 1) * line_height + 10
-                    draw.line([(cursor_x, cursor_y), (cursor_x, cursor_y + line_height - 20)], 
-                             fill=colors["accent"], width=4)
-        
-        elif animation_style == "Fade In":
-            # Fade in effect
-            fade_time = 4
-            progress = min(1.0, t / fade_time)
-            alpha = int(255 * progress)
-            
-            words = verse_text.split()
-            lines = []
-            current_line = []
-            
-            for word in words:
-                test_line = ' '.join(current_line + [word])
-                bbox = verse_font.getbbox(test_line)
-                if bbox[2] - bbox[0] <= box_width - 100:
-                    current_line.append(word)
-                else:
-                    lines.append(' '.join(current_line))
-                    current_line = [word]
-            
-            if current_line:
-                lines.append(' '.join(current_line))
-            
-            line_height = verse_font.getbbox("A")[3] * 1.4
-            start_y = box_y + 100
-            
-            for i, line in enumerate(lines):
-                bbox = verse_font.getbbox(line)
-                line_width = bbox[2] - bbox[0]
-                x = (width - line_width) // 2
-                draw.text((x, start_y + i * line_height), line, 
-                         font=verse_font, fill=colors["text"][:3] + (alpha,))
-        
-        # Animate reference (appears last)
-        if t > duration - 2:
-            ref_alpha = min(255, int((t - (duration - 2)) * 255))
-            ref_bbox = ref_font.getbbox(reference)
-            ref_x = box_x + box_width - (ref_bbox[2] - ref_bbox[0]) - 50
-            ref_y = box_y + box_height + 50
-            
-            draw.text((ref_x, ref_y), reference, 
-                     font=ref_font, 
-                     fill=colors["accent"][:3] + (ref_alpha,))
-        
+        img = create_scripture_design(
+            width, height, theme_name, hook, verse, ref, t
+        )
         return np.array(img.convert("RGB"))
     
-    # Create video clip
     clip = VideoClip(make_frame, duration=duration)
     clip = clip.set_fps(fps)
     
-    # Render to temporary file
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
-        temp_path = tmp.name
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+    temp_path = temp_file.name
+    
+    try:
         clip.write_videofile(
             temp_path,
             fps=fps,
             codec="libx264",
             audio_codec="aac",
-            temp_audiofile="temp-audio.m4a",
-            remove_temp=True,
             verbose=False,
-            logger=None
+            logger=None,
+            preset='ultrafast'
         )
-    
-    # Read and return video bytes
-    with open(temp_path, 'rb') as f:
-        video_bytes = f.read()
-    
-    # Cleanup
-    os.unlink(temp_path)
-    
-    return video_bytes
+        
+        with open(temp_path, 'rb') as f:
+            video_bytes = f.read()
+        
+        return video_bytes
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
 
 # ============================================================================
-# STREAMLIT UI - ENHANCED
+# STREAMLIT UI
 # ============================================================================
-# Custom CSS
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 3rem;
-        background: linear-gradient(90deg, #4CAF50, #2196F3);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .stButton>button {
-        width: 100%;
-        background: linear-gradient(90deg, #4CAF50, #2196F3);
-        color: white;
-        border: none;
-        padding: 0.75rem;
-        border-radius: 10px;
-        font-weight: bold;
-    }
-    .stButton>button:hover {
-        background: linear-gradient(90deg, #45a049, #1976D2);
-        transform: translateY(-2px);
-        transition: all 0.3s;
-    }
-    .sidebar .sidebar-content {
-        background: linear-gradient(180deg, #1a1a2e, #16213e);
-    }
-</style>
-""", unsafe_allow_html=True)
+st.title("⚡ Scripture Motion Pro")
+st.markdown("### TikTok-Ready Scripture Videos • Flat Design • AI-Powered")
 
-# Header
-st.markdown('<h1 class="main-header">🧠 STILL MIND PRO</h1>', unsafe_allow_html=True)
-st.markdown("### Create beautiful scripture graphics & videos for social media")
+# Initialize session
+if 'hook' not in st.session_state:
+    st.session_state.hook = "BE STILL"
+if 'caption' not in st.session_state:
+    st.session_state.caption = ""
 
 # Sidebar
 with st.sidebar:
-    st.header("🎨 Design Settings")
+    st.markdown("### 🎨 Design")
     
-    size_option = st.selectbox("Format Size", list(SIZES.keys()))
-    width, height = SIZES[size_option]
+    # Theme selection
+    theme_option = st.selectbox(
+        "Choose Theme",
+        list(EMOTIONAL_THEMES.keys()),
+        index=0
+    )
     
-    theme_option = st.selectbox("Color Theme", list(COLORS.keys()))
-    selected_colors = COLORS[theme_option]
+    theme = EMOTIONAL_THEMES[theme_option]
+    emotion = theme["emotion"]
     
-    bg_option = st.selectbox("Background Style", BACKGROUND_STYLES)
+    # Show theme preview
+    st.markdown(f"""
+    <div style="background: rgba{theme['colors']['bg'][:3] + (0.2,)};
+                padding: 1rem; border-radius: 10px; margin: 1rem 0;
+                border-left: 4px solid rgba{theme['colors']['primary'][:3] + (1,)};">
+        <div style="color: rgba{theme['colors']['text'][:3] + (1,)}; font-weight: bold;">
+            {theme_option}
+        </div>
+        <div class="emotion-badge" style="background: rgba{theme['colors']['primary'][:3] + (0.2,)}; 
+               color: rgba{theme['colors']['primary'][:3] + (1,)};">
+            {emotion.upper()}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
-    st.header("📖 Scripture Content")
+    st.markdown("---")
     
-    # Bible book selection with search
-    BIBLE_BOOKS = ["Genesis", "Exodus", "Psalms", "Proverbs", "Isaiah", 
-                   "Matthew", "Mark", "Luke", "John", "Romans", "Corinthians",
-                   "Galatians", "Ephesians", "Philippians", "Colossians",
-                   "Thessalonians", "Timothy", "Hebrews", "James", "Peter", "John"]
+    # Scripture input
+    st.markdown("### 📖 Scripture")
     
-    book = st.selectbox("Book", BIBLE_BOOKS, index=2)  # Default to Psalms
+    verse = st.text_area(
+        "Verse Text",
+        "Be still, and know that I am God. I will be exalted among the nations, I will be exalted in the earth.",
+        height=120
+    )
     
-    col1, col2 = st.columns(2)
-    with col1:
-        chapter = st.number_input("Chapter", min_value=1, max_value=150, value=23)
-    with col2:
-        verse = st.number_input("Verse", min_value=1, max_value=176, value=1)
+    ref = st.text_input(
+        "Reference",
+        "PSALM 46:10"
+    )
     
-    hook = st.text_input("Header Text", "PEACE BE STILL")
+    st.markdown("---")
     
-    st.header("🎬 Animation")
-    animation_option = st.selectbox("Animation Style", ANIMATION_STYLES)
-    text_effect = st.selectbox("Text Effect", TEXT_EFFECTS)
+    # AI Tools
+    st.markdown("### 🤖 AI Tools")
     
-    st.header("⚡ Quick Actions")
+    if get_groq_client():
+        st.success("✅ AI Connected")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🎯 Generate Hook", use_container_width=True):
+                with st.spinner("Creating..."):
+                    hook = generate_ai_hook(verse, theme_option, emotion)
+                    st.session_state.hook = hook
+                    st.success(f"✓ {hook}")
+        
+        with col2:
+            if st.button("📝 Generate Caption", use_container_width=True):
+                with st.spinner("Writing..."):
+                    caption = generate_ai_caption(
+                        st.session_state.hook, verse, ref, theme_option, emotion
+                    )
+                    st.session_state.caption = caption
+                    st.success("Caption ready!")
+    else:
+        st.warning("⚠️ Add Groq API key to secrets for AI features")
     
-    if st.button("🔄 Refresh Preview", use_container_width=True):
-        st.rerun()
+    st.markdown("---")
     
-    st.divider()
-    st.caption("Made with ❤️ for sharing God's Word")
+    # Hook input
+    hook = st.text_input(
+        "Hook/Title",
+        value=st.session_state.hook,
+        help="Short title (AI can generate this)"
+    ).upper()
+    
+    st.session_state.hook = hook
+    
+    # Size selection
+    st.markdown("---")
+    st.markdown("### 📐 Size")
+    
+    size_option = st.radio(
+        "Video Size",
+        ["TikTok (1080x1920)", "Instagram (1080x1350)", "Square (1080x1080)"],
+        index=0
+    )
+    
+    if "TikTok" in size_option:
+        width, height = 1080, 1920
+    elif "Instagram" in size_option:
+        width, height = 1080, 1350
+    else:
+        width, height = 1080, 1080
+    
+    # Animation preview
+    st.markdown("---")
+    st.markdown("### ⏱️ Preview")
+    
+    time_slider = st.slider(
+        "Animation Time",
+        0.0, 7.0, 0.0, 0.1
+    )
+    
+    st.markdown("---")
+    
+    # Actions
+    if st.button("🎬 CREATE VIDEO", type="primary", use_container_width=True):
+        st.session_state.create_video = True
+    
+    if st.button("🖼️ EXPORT IMAGE", use_container_width=True):
+        st.session_state.export_image = True
 
-# Main content area
+# Main content
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    # Preview section
-    st.subheader("🎨 Live Preview")
+    # Live preview
+    st.markdown("### 👁️ LIVE PREVIEW")
     
-    # Generate preview image
-    with st.spinner("Creating preview..."):
-        preview_img = create_still_image(
-            width, height, selected_colors, 
-            book, chapter, verse, hook,
-            bg_option, text_effect
-        )
+    # Create preview
+    preview_width = 400 if height > width else 500
+    preview_height = int(preview_width * height / width)
     
-    # Display preview
+    preview_img = create_scripture_design(
+        preview_width, preview_height, theme_option, hook, verse, ref, time_slider
+    )
+    
     st.image(preview_img, use_column_width=True)
     
-    # Download buttons
-    col_dl1, col_dl2 = st.columns(2)
-    
-    with col_dl1:
-        # PNG download
-        img_buffer = io.BytesIO()
-        preview_img.save(img_buffer, format='PNG', optimize=True, quality=95)
-        
-        st.download_button(
-            label="📥 Download PNG (High Quality)",
-            data=img_buffer.getvalue(),
-            file_name=f"stillmind_{book}_{chapter}_{verse}.png",
-            mime="image/png",
-            use_container_width=True
-        )
-    
-    with col_dl2:
-        # Video generation
-        if st.button("🎬 Generate Video (8s)", use_container_width=True):
-            with st.spinner("Rendering video... This may take a moment"):
-                video_data = create_animated_video(
-                    width, height, selected_colors,
-                    book, chapter, verse, hook,
-                    bg_option, animation_option
-                )
-                
-                # Display video
-                st.video(video_data)
-                
-                # Video download
+    # Video generation
+    if st.session_state.get('create_video', False):
+        with st.spinner("🎬 Creating TikTok-ready video..."):
+            video_data = create_scripture_video(
+                width, height, theme_option, hook, verse, ref
+            )
+            
+            st.video(video_data)
+            
+            # Download buttons
+            col_v1, col_v2 = st.columns(2)
+            
+            with col_v1:
                 st.download_button(
-                    label="📥 Download MP4 Video",
+                    label="📥 Download MP4",
                     data=video_data,
-                    file_name=f"stillmind_{book}_{chapter}_{verse}.mp4",
+                    file_name=f"scripture_{theme_option.lower().replace(' ', '_')}.mp4",
                     mime="video/mp4",
                     use_container_width=True
                 )
+            
+            with col_v2:
+                st.download_button(
+                    label="📱 Copy Caption",
+                    data=st.session_state.caption,
+                    file_name="caption.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
+        
+        st.session_state.create_video = False
+    
+    # Image export
+    if st.session_state.get('export_image', False):
+        with st.spinner("Creating high-quality image..."):
+            full_img = create_scripture_design(
+                width, height, theme_option, hook, verse, ref, 0
+            )
+            
+            img_buffer = io.BytesIO()
+            full_img.save(img_buffer, format='PNG', optimize=True, quality=95)
+            
+            st.download_button(
+                label="📥 Download PNG",
+                data=img_buffer.getvalue(),
+                file_name=f"scripture_{theme_option.lower().replace(' ', '_')}.png",
+                mime="image/png",
+                use_container_width=True
+            )
+        
+        st.session_state.export_image = False
 
 with col2:
-    # Information panel
-    st.subheader("📊 Details")
+    # Features & Info
+    st.markdown("### ⚡ FEATURES")
+    
+    features = [
+        "🎨 **4 Emotional Themes** - Each with unique animations",
+        "🌀 **Animated Backgrounds** - Flat design with movement",
+        "✍️ **Kinetic Typography** - Typewriter, fade, pulse effects",
+        "🤖 **AI-Powered** - Auto-generate hooks & captions",
+        "📱 **TikTok Optimized** - Perfect 9:16 vertical format",
+        "⚡ **Fast Export** - Ready in seconds, not minutes"
+    ]
+    
+    for feature in features:
+        st.markdown(f"• {feature}")
+    
+    st.markdown("---")
     
     # Stats
-    st.metric("Image Size", f"{width} × {height}")
-    st.metric("Color Theme", theme_option)
-    st.metric("Background", bg_option)
+    st.markdown("### 📊 QUICK STATS")
     
-    st.divider()
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        st.metric("Theme", theme_option)
+        st.metric("Emotion", emotion.title())
     
-    # Verse info
-    _, verse_text = fetch_bible_verse(book, chapter, verse)
-    st.write(f"**Selected Verse:**")
-    st.info(f"{book} {chapter}:{verse}")
+    with col_s2:
+        st.metric("Size", f"{width}×{height}")
+        st.metric("AI", "✅ ON" if get_groq_client() else "⚠️ OFF")
     
-    st.divider()
-    
-    # Social media tools
-    st.subheader("📱 Social Tools")
-    
-    # Generate caption
-    hashtags = {
-        "Psalms": "#Psalm #Worship #Wisdom #Bible",
-        "Matthew": "#Gospel #Jesus #NewTestament #Scripture",
-        "John": "#Gospel #Love #Faith #Christian",
-        "Romans": "#Grace #Faith #Salvation #BibleStudy",
-        "Proverbs": "#Wisdom #Proverbs #Life #Guidance"
-    }
-    
-    default_tags = hashtags.get(book, "#BibleVerse #Scripture #Christian")
-    
-    caption = f"""{hook}
-
-"{verse_text[:120]}..."
-
-📖 {book} {chapter}:{verse}
-
-{default_tags}
-#StillMind #BibleQuote #Faith"""
-
-    st.text_area("Social Media Caption", caption, height=180)
-    
-    if st.button("📋 Copy Caption", use_container_width=True):
-        st.code(caption)
-        st.success("Caption copied to clipboard!")
-    
-    st.divider()
+    st.markdown("---")
     
     # Quick templates
-    st.subheader("🎯 Quick Templates")
+    st.markdown("### ⚡ QUICK TEMPLATES")
     
-    template_col1, template_col2 = st.columns(2)
+    if st.button("🌅 Morning Devotional", use_container_width=True):
+        theme_option = "Morning Calm"
+        hook = "NEW MERCIES"
+        verse = "The steadfast love of the Lord never ceases; his mercies never come to an end; they are new every morning; great is your faithfulness."
+        ref = "LAMENTATIONS 3:22-23"
+        st.rerun()
     
-    with template_col1:
-        if st.button("Peace", use_container_width=True):
-            st.session_state.hook = "PEACE BE STILL"
-            st.session_state.book = "Psalms"
-            st.session_state.chapter = 46
-            st.session_state.verse = 10
-            st.rerun()
+    if st.button("🌙 Evening Peace", use_container_width=True):
+        theme_option = "Night Stillness"
+        hook = "PEACEFUL NIGHT"
+        verse = "In peace I will lie down and sleep, for you alone, Lord, make me dwell in safety."
+        ref = "PSALM 4:8"
+        st.rerun()
     
-    with template_col2:
-        if st.button("Strength", use_container_width=True):
-            st.session_state.hook = "BE STRONG"
-            st.session_state.book = "Isaiah"
-            st.session_state.chapter = 41
-            st.session_state.verse = 10
-            st.rerun()
+    if st.button("🌿 Psalm 23", use_container_width=True):
+        theme_option = "Forest Peace"
+        hook = "MY SHEPHERD"
+        verse = "The Lord is my shepherd, I lack nothing. He makes me lie down in green pastures, he leads me beside quiet waters, he refreshes my soul."
+        ref = "PSALM 23:1-3"
+        st.rerun()
+    
+    st.markdown("---")
+    
+    # Caption preview
+    if st.session_state.caption:
+        st.markdown("### 📝 CAPTION PREVIEW")
+        st.text_area("Ready to Copy:", st.session_state.caption, height=150)
 
 # Footer
-st.divider()
+st.markdown("---")
 st.markdown("""
-<div style='text-align: center; color: #666;'>
-    <p>Still Mind Pro v2.0 | Create beautiful scripture graphics for social media</p>
-    <p>All Bible verses from public domain translations</p>
+<div style="text-align: center; color: #666; font-size: 0.9rem;">
+    <p>⚡ Scripture Motion Pro • Made for TikTok Growth • Flat Design Animations</p>
+    <p>Create 30+ videos per hour • Post 3x daily • Grow your following</p>
 </div>
 """, unsafe_allow_html=True)
