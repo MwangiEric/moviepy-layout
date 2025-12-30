@@ -1,691 +1,544 @@
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageChops
-import io, os, math, time, random, json, requests
-import numpy as np
-from datetime import datetime
+import io, math, random, json, numpy as np
 import imageio.v3 as iio
-from groq import Groq
-from typing import Tuple, List, Dict, Optional
-from dataclasses import dataclass
+from datetime import datetime
+from typing import Tuple, List, Dict
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
 st.set_page_config(
-    page_title="Still Mind | Vectorized Animations",
+    page_title="Still Mind | Creative Studio",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# Brand Configuration
-BRAND_COLORS = {
-    "primary_green": (76, 175, 80, 255),
-    "dark_green": (56, 142, 60, 255),
-    "navy_blue": (13, 27, 42, 255),
-    "dark_navy": (5, 15, 25, 255),
+# Brand Colors
+BRAND = {
+    "navy": (13, 27, 42, 255),
+    "yellow": (255, 204, 0, 255),
+    "blue": (100, 180, 255, 255),
     "white": (255, 255, 255, 255),
-    "light_grey": (224, 224, 224, 255),
-    "medium_grey": (158, 158, 158, 255),
-    "accent_blue": (25, 118, 210, 255),
-    "brand_yellow": (255, 204, 0, 255),
-    "sky_blue": (100, 180, 255, 255)
+    "green": (76, 175, 80, 255),
+    "dark_navy": (5, 15, 25, 255)
 }
 
 SIZES = {
-    "Instagram Square (1080x1080)": (1080, 1080),
     "Instagram Story (1080x1920)": (1080, 1920),
-    "Twitter Post (1200x675)": (1200, 675),
+    "Instagram Square (1080x1080)": (1080, 1080),
+    "Twitter (1200x675)": (1200, 675),
 }
 
-@dataclass
-class AnimationConfig:
-    duration: int = 8
-    fps: int = 15
-    total_frames: int = 120
-    bitrate: str = "8000k"
-    pixel_format: str = "yuv420p"
+VIDEO_CONFIG = {
+    "fps": 15,
+    "duration": 8,
+    "total_frames": 120,  # 8 * 15
+    "bitrate": "8000k",
+    "pixel_format": "yuv420p"
+}
 
 # ============================================================================
-# VECTORIZED BACKGROUND GENERATORS
+# MATHEMATICAL LOOP ENGINE
 # ============================================================================
-class VectorizedBackgrounds:
-    """Vectorized background animations using numpy for speed and quality"""
+class PerfectLoopEngine:
+    """Mathematical engine for perfect looping animations"""
     
     @staticmethod
-    def create_flocking_birds(width: int, height: int, time_offset: float) -> Image.Image:
-        """Flocking birds with Boids algorithm simulation"""
+    def get_loop_factor(t: float, duration: float) -> float:
+        """Converts time to 0→2π cycle for perfect loops"""
+        return (t / duration) * (2 * math.pi)
+    
+    @staticmethod
+    def ease_in_out(t: float) -> float:
+        """Smooth easing function for animations"""
+        return 0.5 - 0.5 * math.cos(t * math.pi)
+    
+    @staticmethod
+    def create_seamless_background(width: int, height: int, 
+                                  time: float, duration: float, 
+                                  style: str) -> Image.Image:
+        """Generate perfectly looping background"""
+        phase = PerfectLoopEngine.get_loop_factor(time, duration)
+        
         # Create base canvas
-        img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        img = Image.new("RGBA", (width, height))
         draw = ImageDraw.Draw(img)
         
-        # Parameters for flock simulation
-        num_birds = 7
-        flock_center_x = width // 2
-        flock_center_y = height // 3
-        
-        # Boids parameters
-        separation_distance = 80
-        alignment_strength = 0.1
-        cohesion_strength = 0.05
-        
-        # Time-based flock movement
-        flock_x = flock_center_x + math.sin(time_offset * 0.5) * 200
-        flock_y = flock_center_y + math.cos(time_offset * 0.3) * 100
-        
-        # Generate bird positions using Boids-like logic
-        for i in range(num_birds):
-            # Base position with separation
-            angle = (i / num_birds) * (2 * math.pi)
-            radius = 60 + math.sin(time_offset * 2 + i) * 20
+        if style == "🟡 Kinetic Bubble":
+            # Liquid bubble physics
+            draw.rectangle([0, 0, width, height], fill=BRAND["yellow"])
+            cx, cy = width // 2, height // 2
             
-            # Flock movement calculations
-            separation_x = math.cos(angle + time_offset) * separation_distance
-            separation_y = math.sin(angle + time_offset) * separation_distance
-            
-            # Alignment (birds tend to fly in same direction)
-            alignment_x = math.cos(time_offset * 1.5) * 100
-            alignment_y = math.sin(time_offset * 1.2) * 50
-            
-            # Cohesion (birds move toward flock center)
-            to_center_x = flock_x - (flock_x + separation_x)
-            to_center_y = flock_y - (flock_y + separation_y)
-            
-            # Final position
-            x = flock_x + separation_x + alignment_x * alignment_strength + to_center_x * cohesion_strength
-            y = flock_y + separation_y + alignment_y * alignment_strength + to_center_y * cohesion_strength
-            
-            # Ensure birds stay in frame
-            x = max(50, min(width - 50, x))
-            y = max(100, min(height - 100, y))
-            
-            # Wing flap animation
-            wing_angle = time_offset * 8 + i
-            flap_height = 15 * abs(math.sin(wing_angle))
-            
-            # Draw V-shaped bird (silhouette)
-            # Main body line
-            body_length = 40
-            body_x = x + math.cos(time_offset) * 5
-            body_y = y + math.sin(time_offset) * 5
-            
-            # Wings
-            wing_length = 25
-            left_wing_end_x = body_x - wing_length * math.cos(math.pi/4)
-            left_wing_end_y = body_y - wing_length * math.sin(math.pi/4) - flap_height
-            
-            right_wing_end_x = body_x + wing_length * math.cos(math.pi/4)
-            right_wing_end_y = body_y - wing_length * math.sin(math.pi/4) - flap_height
-            
-            # Draw bird with gradient opacity for depth
-            opacity = int(180 + 75 * math.sin(time_offset + i))
-            color = (255, 255, 255, opacity)
-            
-            # Draw connecting lines for V shape
-            draw.line([(left_wing_end_x, left_wing_end_y), (body_x, body_y)], 
-                     fill=color, width=3)
-            draw.line([(body_x, body_y), (right_wing_end_x, right_wing_end_y)], 
-                     fill=color, width=3)
-            
-            # Optional: Add subtle motion blur trail
-            if time_offset > 0.5:
-                trail_length = 30
-                trail_opacity = int(opacity * 0.3)
-                trail_color = (255, 255, 255, trail_opacity)
-                draw.line([(x - 10, y), (x - 40, y - 20)], 
-                         fill=trail_color, width=2)
-        
-        # Apply Gaussian blur for motion effect
-        img = img.filter(ImageFilter.GaussianBlur(radius=2))
-        
-        return img
-    
-    @staticmethod
-    def create_geometric_pulse(width: int, height: int, time_offset: float) -> Image.Image:
-        """Geometric pulse with Lissajous curves and expanding grids"""
-        # Create base with dark navy
-        img = Image.new("RGBA", (width, height), BRAND_COLORS["dark_navy"])
-        draw = ImageDraw.Draw(img)
-        
-        center_x, center_y = width // 2, height // 2
-        
-        # Lissajous curve parameters
-        a = 3  # Frequency in x
-        b = 2  # Frequency in y
-        delta = math.pi / 2  # Phase difference
-        
-        # Draw Lissajous curve
-        points = []
-        for i in range(0, 360, 2):
-            t = math.radians(i)
-            # Calculate Lissajous coordinates
-            lx = center_x + 300 * math.sin(a * t + time_offset + delta)
-            ly = center_y + 300 * math.sin(b * t + time_offset)
-            points.append((lx, ly))
-        
-        # Draw the curve with gradient opacity
-        for i in range(len(points) - 1):
-            progress = i / len(points)
-            opacity = int(150 + 105 * math.sin(progress * math.pi + time_offset))
-            color = BRAND_COLORS["primary_green"][:3] + (opacity,)
-            
-            # Vary line thickness
-            thickness = 1 + int(3 * abs(math.sin(progress * 4 + time_offset)))
-            
-            draw.line([points[i], points[i+1]], 
-                     fill=color, width=thickness)
-        
-        # Add expanding concentric circles
-        num_circles = 8
-        for i in range(num_circles):
-            # Pulse effect (60 BPM = 1 Hz = circles expand once per second)
-            pulse_speed = 1.0  # 1 complete cycle per second for 60 BPM feel
-            radius = (i * 80 + time_offset * 100 * pulse_speed) % 500
-            
-            # Calculate opacity based on radius
-            circle_opacity = int(100 * (1 - radius/500))
-            if circle_opacity > 0:
-                color = BRAND_COLORS["accent_blue"][:3] + (circle_opacity,)
-                draw.ellipse([center_x - radius, center_y - radius,
-                             center_x + radius, center_y + radius],
-                            outline=color, width=1)
-        
-        # Add mathematical grid
-        grid_spacing = 60
-        grid_opacity = 30
-        
-        # Vertical grid lines
-        for x in range(0, width, grid_spacing):
-            offset = math.sin(time_offset + x * 0.01) * 5
-            draw.line([(x + offset, 0), (x + offset, height)],
-                     fill=(255, 255, 255, grid_opacity), width=1)
-        
-        # Horizontal grid lines
-        for y in range(0, height, grid_spacing):
-            offset = math.cos(time_offset + y * 0.01) * 5
-            draw.line([(0, y + offset), (width, y + offset)],
-                     fill=(255, 255, 255, grid_opacity), width=1)
-        
-        return img
-    
-    @staticmethod
-    def create_organic_growth(width: int, height: int, time_offset: float) -> Image.Image:
-        """Organic vine growth with procedural leaves"""
-        # Create base canvas
-        img = Image.new("RGBA", (width, height), BRAND_COLORS["dark_navy"])
-        draw = ImageDraw.Draw(img)
-        
-        # Vine stem position
-        stem_x = width * 0.2
-        
-        # Calculate growth progress (0 to 1 over 8 seconds)
-        growth_progress = min(1.0, time_offset / 4)
-        
-        # Vine height
-        vine_height = height * 0.8 * growth_progress
-        base_y = height - 50
-        
-        # Draw main vine stem with gradient thickness
-        stem_thickness = 8 + 4 * math.sin(time_offset * 2)
-        
-        # Stem with slight curve
-        points = []
-        segments = 20
-        for i in range(segments + 1):
-            segment_progress = i / segments
-            x = stem_x + math.sin(segment_progress * math.pi) * 30
-            y = base_y - vine_height * segment_progress
-            points.append((x, y))
-        
-        # Draw the curved stem
-        for i in range(len(points) - 1):
-            # Vary stem color slightly
-            green_shade = int(BRAND_COLORS["dark_green"][1] * (0.8 + 0.2 * math.sin(i * 0.5)))
-            stem_color = (BRAND_COLORS["dark_green"][0], green_shade, 
-                         BRAND_COLORS["dark_green"][2], 220)
-            
-            # Draw segment with varying thickness
-            segment_thickness = int(stem_thickness * (1 - i/segments * 0.5))
-            draw.line([points[i], points[i+1]], 
-                     fill=stem_color, width=segment_thickness)
-        
-        # Draw leaves at intervals along the vine
-        if growth_progress > 0.1:
-            leaf_count = int(8 * growth_progress)
-            for i in range(leaf_count):
-                # Position along vine
-                leaf_position = (i + 1) / (leaf_count + 1)
-                leaf_y = base_y - vine_height * leaf_position
-                
-                # Leaf x position (alternating sides)
-                side = 1 if i % 2 == 0 else -1
-                leaf_x = stem_x + side * (40 + math.sin(time_offset * 3 + i) * 15)
-                
-                # Leaf size and rotation
-                leaf_size = 25 + 10 * math.sin(time_offset * 4 + i)
-                leaf_angle = side * (30 + math.sin(time_offset * 2 + i) * 15)
-                
-                # Draw leaf (simplified as ellipse for now, could be more complex)
-                leaf_color = BRAND_COLORS["primary_green"][:3] + (200,)
-                
-                # Create leaf shape (ellipse rotated)
-                leaf_img = Image.new("RGBA", (int(leaf_size * 2), int(leaf_size)), (0, 0, 0, 0))
-                leaf_draw = ImageDraw.Draw(leaf_img)
-                leaf_draw.ellipse([0, 0, leaf_size * 2, leaf_size], 
-                                 fill=leaf_color)
-                
-                # Rotate leaf
-                leaf_img = leaf_img.rotate(leaf_angle, expand=True, fillcolor=(0, 0, 0, 0))
-                
-                # Calculate position to paste
-                paste_x = int(leaf_x - leaf_img.width // 2)
-                paste_y = int(leaf_y - leaf_img.height // 2)
-                
-                # Composite leaf onto main image
-                img.paste(leaf_img, (paste_x, paste_y), leaf_img)
-        
-        # Add subtle particles/particulates floating around
-        particle_count = 30
-        for i in range(particle_count):
-            # Particle position with organic movement
-            px = (i * 37 + time_offset * 50) % width
-            py = (i * 23 + time_offset * 30) % height
-            
-            # Size and opacity
-            size = 1 + math.sin(time_offset * 3 + i) * 0.5
-            opacity = int(100 + 100 * abs(math.sin(time_offset * 2 + i)))
-            
-            # Draw particle (tiny circles)
-            color = BRAND_COLORS["primary_green"][:3] + (opacity,)
-            draw.ellipse([px-size, py-size, px+size, py+size], fill=color)
-        
-        return img
-    
-    @staticmethod
-    def create_circle_card(width: int, height: int, time_offset: float) -> Image.Image:
-        """Circle card design inspired by your yellow attachment"""
-        # Create brand yellow background
-        img = Image.new("RGBA", (width, height), BRAND_COLORS["brand_yellow"])
-        draw = ImageDraw.Draw(img)
-        
-        center_x, center_y = width // 2, height // 2
-        
-        # Pulsing central circle
-        pulse_factor = 1.0 + math.sin(time_offset * 2) * 0.02
-        base_radius = 400
-        current_radius = base_radius * pulse_factor
-        
-        # Draw central white circle with animated border
-        # Create a supersampled version for crisp edges
-        supersample_factor = 2
-        supersize = (width * supersample_factor, height * supersample_factor)
-        super_img = Image.new("RGBA", supersize, BRAND_COLORS["brand_yellow"])
-        super_draw = ImageDraw.Draw(super_img)
-        
-        # Draw circle at supersampled resolution
-        super_center_x = center_x * supersample_factor
-        super_center_y = center_y * supersample_factor
-        super_radius = current_radius * supersample_factor
-        
-        super_draw.ellipse([super_center_x - super_radius, super_center_y - super_radius,
-                           super_center_x + super_radius, super_center_y + super_radius],
-                          fill=BRAND_COLORS["white"])
-        
-        # Draw animated border (pulse follows the circle)
-        border_width = 15 * supersample_factor
-        border_radius = super_radius + border_width // 2
-        
-        # Animate border color slightly
-        border_brightness = 200 + int(55 * math.sin(time_offset * 3))
-        border_color = (border_brightness, border_brightness, border_brightness, 255)
-        
-        super_draw.arc([super_center_x - border_radius, super_center_y - border_radius,
-                       super_center_x + border_radius, super_center_y + border_radius],
-                      start=0, end=360, fill=border_color, width=border_width)
-        
-        # Downscale with Lanczos for crisp edges
-        img = super_img.resize((width, height), Image.Resampling.LANCZOS)
-        draw = ImageDraw.Draw(img)
-        
-        # Add floating geometric elements around the circle
-        num_elements = 12
-        for i in range(num_elements):
-            angle = (i / num_elements) * (2 * math.pi) + time_offset
-            distance = current_radius + 80
-            
-            elem_x = center_x + math.cos(angle) * distance
-            elem_y = center_y + math.sin(angle) * distance
-            
-            # Element size and rotation
-            elem_size = 15 + 5 * math.sin(time_offset * 4 + i)
-            rotation = time_offset * 100 + i * 30
-            
-            # Draw small geometric shapes (triangles)
+            # Generate wobbling vertices
+            num_points = 16
             points = []
-            for j in range(3):
-                point_angle = rotation + j * (2 * math.pi / 3)
-                px = elem_x + elem_size * math.cos(point_angle)
-                py = elem_y + elem_size * math.sin(point_angle)
+            for i in range(num_points):
+                angle = (i / num_points) * (2 * math.pi)
+                # Multiple frequency wobbles for organic motion
+                wobble1 = math.sin(phase * 2 + i * 0.5) * 8
+                wobble2 = math.cos(phase * 1.5 + i * 0.8) * 4
+                wobble3 = math.sin(phase * 3 + i * 1.2) * 2
+                r = 450 + wobble1 + wobble2 + wobble3
+                px = cx + math.cos(angle) * r
+                py = cy + math.sin(angle) * r
                 points.append((px, py))
             
-            # Color with brand consistency
-            color = BRAND_COLORS["primary_green"][:3] + (180,)
-            draw.polygon(points, fill=color)
-        
-        return img
-    
-    @staticmethod
-    def create_rectangle_card(width: int, height: int, time_offset: float) -> Image.Image:
-        """Rectangle card design inspired by your blue attachment"""
-        # Create sky blue background
-        img = Image.new("RGBA", (width, height), BRAND_COLORS["sky_blue"])
-        draw = ImageDraw.Draw(img)
-        
-        # Card dimensions and animation
-        margin = 100
-        card_width = width - 2 * margin
-        card_height = min(600, height - 2 * margin)
-        
-        # Floating animation
-        float_offset = math.sin(time_offset * 1.5) * 15
-        card_y = (height - card_height) // 2 + float_offset
-        
-        # Card coordinates
-        card_coords = [margin, card_y, width - margin, card_y + card_height]
-        
-        # Create supersampled card for crisp edges
-        supersample_factor = 2
-        supersize = (width * supersample_factor, height * supersample_factor)
-        super_img = Image.new("RGBA", supersize, BRAND_COLORS["sky_blue"])
-        super_draw = ImageDraw.Draw(super_img)
-        
-        # Draw card at supersampled resolution
-        super_margin = margin * supersample_factor
-        super_card_y = card_y * supersample_factor
-        super_card_height = card_height * supersample_factor
-        
-        super_card_coords = [super_margin, super_card_y,
-                           supersize[0] - super_margin, super_card_y + super_card_height]
-        
-        # Draw white card with rounded corners
-        super_draw.rounded_rectangle(super_card_coords, radius=40*supersample_factor,
-                                    fill=BRAND_COLORS["white"])
-        
-        # Draw thick animated border
-        border_width = 15 * supersample_factor
-        border_color = BRAND_COLORS["dark_navy"][:3] + (220,)
-        
-        # Animate border thickness slightly
-        animated_border_width = int(border_width * (0.9 + 0.1 * math.sin(time_offset * 3)))
-        
-        # Draw border (rounded rectangle with larger radius for border)
-        border_coords = [super_card_coords[0] - animated_border_width//2,
-                        super_card_coords[1] - animated_border_width//2,
-                        super_card_coords[2] + animated_border_width//2,
-                        super_card_coords[3] + animated_border_width//2]
-        
-        super_draw.rounded_rectangle(border_coords, radius=45*supersample_factor,
-                                    outline=border_color, width=animated_border_width)
-        
-        # Downscale with Lanczos
-        img = super_img.resize((width, height), Image.Resampling.LANCZOS)
-        draw = ImageDraw.Draw(img)
-        
-        # Add decorative elements inside card
-        # Horizontal rule lines
-        for i in range(3):
-            line_y = card_y + 100 + i * 150
-            line_opacity = int(100 + 100 * math.sin(time_offset * 2 + i))
-            line_color = BRAND_COLORS["medium_grey"][:3] + (line_opacity,)
+            # Shadow with blur
+            shadow_img = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            shadow_draw = ImageDraw.Draw(shadow_img)
+            shadow_draw.polygon([(p[0]+15, p[1]+15) for p in points], 
+                               fill=(210, 160, 0, 180))
+            shadow_img = shadow_img.filter(ImageFilter.GaussianBlur(radius=10))
+            img = Image.alpha_composite(img, shadow_img)
             
-            draw.line([(margin + 50, line_y), (width - margin - 50, line_y)],
-                     fill=line_color, width=2)
-        
-        # Floating dots in corners
-        dot_positions = [
-            (margin + 40, card_y + 40),
-            (width - margin - 40, card_y + 40),
-            (margin + 40, card_y + card_height - 40),
-            (width - margin - 40, card_y + card_height - 40)
-        ]
-        
-        for i, (dx, dy) in enumerate(dot_positions):
-            pulse = 1.0 + math.sin(time_offset * 4 + i) * 0.3
-            dot_size = 8 * pulse
+            # Main bubble with gradient
+            for i in range(len(points)):
+                next_i = (i + 1) % len(points)
+                draw.line([points[i], points[next_i]], 
+                         fill=BRAND["white"], width=10)
             
-            dot_color = BRAND_COLORS["primary_green"][:3] + (200,)
-            draw.ellipse([dx-dot_size, dy-dot_size, dx+dot_size, dy+dot_size],
-                        fill=dot_color)
-        
-        return img
-    
-    @staticmethod
-    def create_aura_orbs(width: int, height: int, time_offset: float) -> Image.Image:
-        """Aura orbs with vectorized compositing and Gaussian blur for seamless gradients"""
-        # Create dark navy base canvas
-        img = Image.new("RGBA", (width, height), BRAND_COLORS["dark_navy"])
-        draw = ImageDraw.Draw(img)
-        
-        # Create multiple aura orbs
-        num_orbs = 5
-        orb_colors = [
-            BRAND_COLORS["primary_green"],
-            BRAND_COLORS["accent_blue"],
-            BRAND_COLORS["brand_yellow"],
-            (200, 100, 255, 200),  # Purple
-            (255, 150, 100, 200)   # Orange
-        ]
-        
-        for i in range(num_orbs):
-            # Orb position with orbital movement
-            orbit_radius = 300 + i * 50
-            orbit_speed = 0.3 + i * 0.1
+            # Fill bubble
+            if len(points) >= 3:
+                draw.polygon(points, fill=BRAND["white"])
             
-            orb_x = width // 2 + math.cos(time_offset * orbit_speed + i) * orbit_radius
-            orb_y = height // 2 + math.sin(time_offset * orbit_speed * 1.3 + i) * orbit_radius
+            # Animated quote marks
+            quote_size = 40 + math.sin(phase * 4) * 5
+            draw.ellipse([cx-420, cy-420, cx-420+quote_size, cy-420+quote_size], 
+                        fill=BRAND["dark_navy"])
+            draw.ellipse([cx+420-quote_size, cy+420-quote_size, cx+420, cy+420], 
+                        fill=BRAND["dark_navy"])
             
-            # Orb size and opacity
-            orb_size = 150 + 50 * math.sin(time_offset * 2 + i)
-            orb_opacity = int(100 + 100 * abs(math.sin(time_offset * 1.5 + i)))
+        elif style == "🪶 Serene Birds":
+            # Cinematic birds with depth
+            draw.rectangle([0, 0, width, height], fill=BRAND["navy"])
             
-            # Get orb color
-            base_color = orb_colors[i % len(orb_colors)]
-            orb_color = base_color[:3] + (orb_opacity,)
-            
-            # Draw orb with gradient effect using multiple layers
-            layers = 10
-            for layer in range(layers, 0, -1):
-                layer_size = orb_size * (layer / layers)
-                layer_opacity = int(orb_opacity * (layer / layers) * 0.5)
-                layer_color = orb_color[:3] + (layer_opacity,)
+            # Multiple bird layers for depth
+            for layer in range(3):
+                scale = 1.0 - layer * 0.2
+                opacity = 200 - layer * 50
                 
-                draw.ellipse([orb_x - layer_size, orb_y - layer_size,
-                            orb_x + layer_size, orb_y + layer_size],
-                           fill=layer_color)
+                for i in range(5 - layer):
+                    # Perfect horizontal looping with modulo
+                    base_x = (time * 80 * scale + i * 120) % (width + 400) - 200
+                    
+                    # Vertical wave pattern (resets every loop)
+                    vertical = math.sin(phase * 1.5 + i * 0.8) * 60 * scale
+                    
+                    # Flap animation (different frequency)
+                    flap = math.sin(phase * 8 + i * 1.2) * 20 * scale
+                    
+                    bird_x = base_x
+                    bird_y = height * 0.3 + vertical + (i * 80) + (layer * 40)
+                    
+                    # Draw V-shaped bird
+                    left_wing = (bird_x-30, bird_y-flap)
+                    right_wing = (bird_x+30, bird_y-flap)
+                    body = (bird_x, bird_y)
+                    
+                    draw.line([left_wing, body], 
+                             fill=BRAND["white"] + (opacity,), width=4)
+                    draw.line([body, right_wing], 
+                             fill=BRAND["white"] + (opacity,), width=4)
         
-        # Apply high-radius Gaussian blur for seamless liquid gradient
-        img = img.filter(ImageFilter.GaussianBlur(radius=15))
+        elif style == "🔵 Modern Frame":
+            # Floating glass frame with physics
+            draw.rectangle([0, 0, width, height], fill=BRAND["blue"])
+            
+            # Frame dimensions
+            margin = 100
+            frame_height = 700
+            frame_y = height // 2 - frame_height // 2
+            
+            # Floating animation with easing
+            float_offset = math.sin(phase * 1.5) * 25
+            
+            # Create frame shadow
+            shadow_img = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            shadow_draw = ImageDraw.Draw(shadow_img)
+            shadow_coords = [
+                margin + 10, frame_y + float_offset + 10,
+                width - margin + 10, frame_y + frame_height + float_offset + 10
+            ]
+            shadow_draw.rounded_rectangle(shadow_coords, radius=50,
+                                         fill=(0, 0, 0, 60))
+            shadow_img = shadow_img.filter(ImageFilter.GaussianBlur(radius=15))
+            img = Image.alpha_composite(img, shadow_img)
+            
+            # Main frame with animated border
+            frame_coords = [
+                margin, frame_y + float_offset,
+                width - margin, frame_y + frame_height + float_offset
+            ]
+            
+            # Animated border thickness
+            border_pulse = 14 + math.sin(phase * 3) * 2
+            draw.rounded_rectangle(frame_coords, radius=40,
+                                  fill=BRAND["white"],
+                                  outline=BRAND["dark_navy"],
+                                  width=int(border_pulse))
+            
+            # Animated corner dots
+            for i, (dx, dy) in enumerate([(1, 1), (1, -1), (-1, 1), (-1, -1)]):
+                dot_x = margin + 50 if dx == 1 else width - margin - 50
+                dot_y = frame_y + float_offset + 50 if dy == 1 else frame_y + frame_height + float_offset - 50
+                
+                dot_size = 12 + math.sin(phase * 4 + i) * 3
+                draw.ellipse([dot_x-dot_size, dot_y-dot_size,
+                            dot_x+dot_size, dot_y+dot_size],
+                           fill=BRAND["green"])
         
-        # Add subtle grid overlay for structure
-        grid_spacing = 80
-        grid_opacity = 20
+        elif style == "📐 Digital Loom":
+            # Geometric network with Lissajous curves
+            draw.rectangle([0, 0, width, height], fill=BRAND["dark_navy"])
+            
+            # Generate network nodes
+            num_nodes = 8
+            nodes = []
+            for i in range(num_nodes):
+                # Lissajous pattern for node movement
+                a = 3 + i * 0.5
+                b = 2 + i * 0.3
+                
+                node_x = width//2 + math.cos(phase * a) * (400 - i * 40)
+                node_y = height//2 + math.sin(phase * b) * (300 - i * 30)
+                nodes.append((node_x, node_y))
+                
+                # Draw node
+                node_size = 15 + math.sin(phase * 2 + i) * 5
+                node_color = (
+                    int(100 + 155 * abs(math.sin(phase + i))),
+                    int(200 + 55 * abs(math.cos(phase + i))),
+                    int(255),
+                    200
+                )
+                draw.ellipse([node_x-node_size, node_y-node_size,
+                            node_x+node_size, node_y+node_size],
+                           fill=node_color)
+            
+            # Connect nodes based on distance
+            for i in range(len(nodes)):
+                for j in range(i+1, len(nodes)):
+                    dx = nodes[i][0] - nodes[j][0]
+                    dy = nodes[i][1] - nodes[j][1]
+                    distance = math.sqrt(dx*dx + dy*dy)
+                    
+                    if distance < 500:
+                        # Line opacity based on distance
+                        opacity = int(255 * (1 - distance/500))
+                        line_color = (100, 255, 200, opacity)
+                        draw.line([nodes[i], nodes[j]], fill=line_color, width=1)
         
-        for x in range(0, width, grid_spacing):
-            draw.line([(x, 0), (x, height)],
-                     fill=(255, 255, 255, grid_opacity), width=1)
+        elif style == "✨ Aura Orbs":
+            # Vectorized aura orbs with Gaussian blur gradients
+            draw.rectangle([0, 0, width, height], fill=BRAND["navy"])
+            
+            # Create multiple orbs with orbital motion
+            num_orbs = 7
+            for i in range(num_orbs):
+                orbit_speed = 0.3 + i * 0.08
+                orbit_radius = 250 + i * 40
+                
+                orb_x = width//2 + math.cos(phase * orbit_speed) * orbit_radius
+                orb_y = height//2 + math.sin(phase * orbit_speed * 1.3) * orbit_radius
+                
+                # Orb size and color variation
+                orb_size = 120 + math.sin(phase * 2 + i) * 30
+                
+                # Color based on position in orbit
+                hue = (orb_x / width + orb_y / height + phase) % 1.0
+                if hue < 0.33:
+                    color = BRAND["green"]
+                elif hue < 0.66:
+                    color = BRAND["blue"]
+                else:
+                    color = (255, 150, 100, 200)  # Orange
+                
+                # Draw orb with multiple layers for soft glow
+                layers = 8
+                for layer in range(layers, 0, -1):
+                    layer_size = orb_size * (layer / layers)
+                    layer_opacity = int(100 * (layer / layers))
+                    layer_color = color[:3] + (layer_opacity,)
+                    
+                    draw.ellipse([orb_x-layer_size, orb_y-layer_size,
+                                orb_x+layer_size, orb_y+layer_size],
+                               fill=layer_color)
+            
+            # Apply Gaussian blur for seamless gradient
+            img = img.filter(ImageFilter.GaussianBlur(radius=12))
         
-        for y in range(0, height, grid_spacing):
-            draw.line([(0, y), (width, y)],
-                     fill=(255, 255, 255, grid_opacity), width=1)
+        # Add subliminal glimmer particles
+        for i in range(20):
+            # Perfect loop for particles
+            p_progress = (time / duration + i/20) % 1.0
+            px = (i * 137) % width
+            py = height - (p_progress * height)
+            
+            # Fade in/out
+            alpha = int(255 * math.sin(p_progress * math.pi))
+            size = 3 + math.sin(p_progress * 2 * math.pi) * 2
+            
+            draw.ellipse([px-size, py-size, px+size, py+size],
+                        fill=(255, 255, 255, alpha))
+        
+        return img
+
+# ============================================================================
+# ENGAGEMENT HOOKS ENGINE
+# ============================================================================
+class EngagementHooks:
+    """Advanced engagement hooks for viewer retention"""
+    
+    @staticmethod
+    def apply_opening_hook(img: Image.Image, t: float) -> Image.Image:
+        """Initial 0.5s focus blur for instant engagement"""
+        if t < 0.5:
+            # Progressive blur reduction
+            blur_amount = int((1.0 - (t / 0.5)) * 30)
+            img = img.filter(ImageFilter.GaussianBlur(radius=blur_amount))
+        return img
+    
+    @staticmethod
+    def apply_depth_particles(img: Image.Image, t: float) -> Image.Image:
+        """Fast-moving particles for 3D depth illusion"""
+        width, height = img.size
+        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        
+        # Multiple particle layers
+        for layer in range(3):
+            speed_factor = 1.0 + layer * 0.5
+            size_factor = 0.5 + layer * 0.3
+            opacity = 80 - layer * 20
+            
+            for i in range(15):
+                # Particle movement (faster as they get "closer")
+                p_speed = (i * 20 + t * 800 * speed_factor) % height
+                p_x = (i * 73 * (layer + 1)) % width
+                
+                # Size increases as particles approach
+                p_size = int((p_speed / height) * 8 * size_factor)
+                
+                # Position
+                p_y = height - p_speed
+                
+                if p_size > 0:
+                    draw.ellipse([p_x-p_size, p_y-p_size, p_x+p_size, p_y+p_size],
+                                fill=(255, 255, 255, opacity))
+        
+        # Composite particles
+        img = Image.alpha_composite(img.convert("RGBA"), overlay)
+        return img
+    
+    @staticmethod
+    def apply_chromatic_aberration(img: Image.Image, t: float) -> Image.Image:
+        """Subtle color fringing for cinematic lens effect"""
+        if t > 0.3:  # Only apply after initial moment
+            # Split channels
+            if img.mode == "RGB":
+                r, g, b = img.split()
+                
+                # Time-based shift variations
+                shift_x = int(2 + math.sin(t * 3) * 1)
+                shift_y = int(1 + math.cos(t * 2) * 0.5)
+                
+                # Shift red channel slightly
+                r = r.offset(shift_x, shift_y)
+                # Shift blue channel opposite
+                b = b.offset(-shift_x, -shift_y)
+                
+                # Recombine
+                img = Image.merge("RGB", (r, g, b))
+        return img
+    
+    @staticmethod
+    def apply_vignette(img: Image.Image, t: float) -> Image.Image:
+        """Dynamic vignette for focus"""
+        width, height = img.size
+        overlay = Image.new("L", (width, height), 255)
+        draw = ImageDraw.Draw(overlay)
+        
+        center_x, center_y = width // 2, height // 2
+        max_radius = math.sqrt(center_x**2 + center_y**2)
+        
+        # Animate vignette intensity
+        intensity = 0.7 + math.sin(t * 2) * 0.1
+        
+        for y in range(height):
+            for x in range(width):
+                dx = (x - center_x) / center_x
+                dy = (y - center_y) / center_y
+                dist = math.sqrt(dx*dx + dy*dy) * intensity
+                
+                # Apply radial gradient
+                value = int(255 * (1 - dist))
+                overlay.putpixel((x, y), max(0, min(255, value)))
+        
+        # Apply as alpha channel
+        if img.mode == "RGB":
+            img = img.convert("RGBA")
+        
+        # Blend vignette
+        overlay_rgb = Image.merge("RGB", (overlay, overlay, overlay))
+        img = Image.blend(img, overlay_rgb.convert("RGBA"), alpha=0.15)
+        
+        return img
+    
+    @staticmethod
+    def apply_all_hooks(img: Image.Image, t: float, duration: float) -> Image.Image:
+        """Apply all engagement hooks in sequence"""
+        img = img.convert("RGB")
+        
+        # Opening hook (first 0.5s)
+        img = EngagementHooks.apply_opening_hook(img, t)
+        
+        # Depth particles (always on)
+        img = EngagementHooks.apply_depth_particles(img, t)
+        
+        # Chromatic aberration (after initial moment)
+        img = EngagementHooks.apply_chromatic_aberration(img, t)
+        
+        # Dynamic vignette
+        img = EngagementHooks.apply_vignette(img, t)
         
         return img
 
 # ============================================================================
 # SUPERSAMPLED TEXT RENDERER
 # ============================================================================
-class SupersampledTextRenderer:
-    """Render text with supersampling for retina-level quality"""
+class TextRenderer:
+    """Supersampled text rendering with perfect centering"""
     
-    @staticmethod
-    def render_text(text: str, font_size: int, width: int, height: int, 
-                   position: Tuple[float, float] = (0.5, 0.5),
-                   color: Tuple[int, int, int, int] = None) -> Image.Image:
-        """Render text with 2x supersampling"""
-        if color is None:
-            color = BRAND_COLORS["white"]
-        
-        # Calculate supersampled dimensions
-        supersample_factor = 2
-        super_width = width * supersample_factor
-        super_height = height * supersample_factor
-        
-        # Create supersampled canvas
-        super_img = Image.new("RGBA", (super_width, super_height), (0, 0, 0, 0))
-        super_draw = ImageDraw.Draw(super_img)
-        
-        # Load font at supersampled size
+    def __init__(self):
         try:
-            font = ImageFont.truetype("arialbd.ttf", font_size * supersample_factor)
+            self.font_bold = ImageFont.truetype("arialbd.ttf", 80)
+            self.font_regular = ImageFont.truetype("arial.ttf", 60)
+            self.font_italic = ImageFont.truetype("ariali.ttf", 40)
         except:
-            font = ImageFont.load_default()
+            self.font_bold = ImageFont.load_default()
+            self.font_regular = ImageFont.load_default()
+            self.font_italic = ImageFont.load_default()
+    
+    def render_text(self, img: Image.Image, quote: str, author: str, 
+                   t: float, duration: float) -> Image.Image:
+        """Render text with timed animations"""
+        width, height = img.size
+        draw = ImageDraw.Draw(img)
         
-        # Calculate text position
-        text_x = position[0] * super_width
-        text_y = position[1] * super_height
+        # Calculate animation progress
+        text_progress = min(1.0, t / 2)  # Text appears over first 2 seconds
         
-        # Draw text with shadow for depth
-        shadow_offset = 4 * supersample_factor
-        shadow_color = (0, 0, 0, color[3] // 2)
+        if text_progress > 0:
+            # Split quote into lines
+            lines = quote.strip().split('\n')
+            
+            # Calculate total text height
+            line_height = 90
+            total_height = len(lines) * line_height
+            
+            # Center vertically
+            start_y = (height - total_height) // 2
+            
+            # Render each line with typewriter effect
+            for i, line in enumerate(lines):
+                # Character-by-character reveal
+                visible_chars = int(len(line) * text_progress)
+                visible_text = line[:visible_chars]
+                
+                if visible_text:
+                    # Get text dimensions
+                    bbox = self.font_bold.getbbox(visible_text)
+                    text_width = bbox[2] - bbox[0]
+                    
+                    # Center horizontally
+                    x = (width - text_width) // 2
+                    y = start_y + i * line_height
+                    
+                    # Text shadow for depth
+                    shadow_color = (0, 0, 0, int(150 * text_progress))
+                    draw.text((x+3, y+3), visible_text, 
+                             font=self.font_bold, fill=shadow_color)
+                    
+                    # Main text
+                    text_color = BRAND["white"] if "birds" in quote.lower() else BRAND["dark_navy"]
+                    draw.text((x, y), visible_text, 
+                             font=self.font_bold, fill=text_color)
         
-        # Multiple shadow layers for better depth
-        for offset in [(shadow_offset, 0), (0, shadow_offset), 
-                      (-shadow_offset, 0), (0, -shadow_offset)]:
-            super_draw.text((text_x + offset[0], text_y + offset[1]),
-                           text, font=font, fill=shadow_color, anchor="mm")
+        # Render author (appears after quote)
+        if text_progress > 0.7:
+            author_progress = min(1.0, (text_progress - 0.7) / 0.3)
+            author_text = f"— {author}"
+            
+            # Get author dimensions
+            author_bbox = self.font_italic.getbbox(author_text)
+            author_width = author_bbox[2] - author_bbox[0]
+            
+            # Position: bottom right
+            author_x = width - author_width - 60
+            author_y = height - 120
+            
+            # Author with animated background
+            if author_progress > 0.5:
+                bg_opacity = int(100 * author_progress)
+                draw.rectangle(
+                    [author_x-20, author_y-15,
+                     author_x + author_width + 20, 
+                     author_y + (author_bbox[3] - author_bbox[1]) + 15],
+                    fill=BRAND["green"][:3] + (bg_opacity,)
+                )
+            
+            # Author text
+            author_color = BRAND["white"][:3] + (int(255 * author_progress),)
+            draw.text((author_x, author_y), author_text,
+                     font=self.font_italic, fill=author_color)
         
-        # Main text
-        super_draw.text((text_x, text_y), text, font=font, fill=color, anchor="mm")
-        
-        # Downscale with Lanczos filter for crisp edges
-        img = super_img.resize((width, height), Image.Resampling.LANCZOS)
+        # Render brand (always visible, bottom left)
+        brand_text = "@stillmind"
+        draw.text((60, height - 80), brand_text,
+                 font=self.font_regular,
+                 fill=BRAND["white"][:3] + (180,))
         
         return img
 
 # ============================================================================
-# MAIN ANIMATION GENERATOR
+# MAIN VIDEO GENERATOR
 # ============================================================================
-class VectorizedAnimationGenerator:
-    """Generate high-quality vectorized animations"""
+class VideoGenerator:
+    """Generate high-quality MP4 videos with perfect loops"""
     
     def __init__(self):
-        self.bg_generator = VectorizedBackgrounds()
-        self.text_renderer = SupersampledTextRenderer()
-        self.config = AnimationConfig()
+        self.loop_engine = PerfectLoopEngine()
+        self.hooks_engine = EngagementHooks()
+        self.text_renderer = TextRenderer()
     
-    def create_frame(self, 
-                    quote_text: str,
-                    author: str,
-                    size: Tuple[int, int],
-                    bg_style: str,
-                    frame_progress: float,
-                    time_offset: float) -> Image.Image:
-        """Create a single supersampled frame"""
+    def create_video(self, quote: str, author: str, 
+                    size: Tuple[int, int], style: str) -> bytes:
+        """Generate complete video with all effects"""
         width, height = size
+        fps = VIDEO_CONFIG["fps"]
+        duration = VIDEO_CONFIG["duration"]
+        total_frames = VIDEO_CONFIG["total_frames"]
         
-        # Generate background based on style
-        if bg_style == "🪶 Flocking Birds":
-            bg = self.bg_generator.create_flocking_birds(width, height, time_offset)
-        elif bg_style == "📐 Geometric Pulse":
-            bg = self.bg_generator.create_geometric_pulse(width, height, time_offset)
-        elif bg_style == "🌿 Organic Growth":
-            bg = self.bg_generator.create_organic_growth(width, height, time_offset)
-        elif bg_style == "⚪ Circle Card":
-            bg = self.bg_generator.create_circle_card(width, height, time_offset)
-        elif bg_style == "🟦 Rectangle Card":
-            bg = self.bg_generator.create_rectangle_card(width, height, time_offset)
-        elif bg_style == "✨ Aura Orbs":
-            bg = self.bg_generator.create_aura_orbs(width, height, time_offset)
-        else:
-            # Default to navy background
-            bg = Image.new("RGBA", (width, height), BRAND_COLORS["navy_blue"])
-        
-        # Convert to RGB for video encoding
-        bg_rgb = bg.convert("RGB")
-        img = bg_rgb.copy()
-        
-        # Only render text after 0.2 seconds (allows background to establish)
-        if frame_progress > 0.2:
-            # Calculate text opacity based on progress
-            text_opacity = min(1.0, (frame_progress - 0.2) / 0.3)
-            
-            # Render quote text with supersampling
-            quote_color = BRAND_COLORS["white"][:3] + (int(255 * text_opacity),)
-            quote_img = self.text_renderer.render_text(
-                quote_text, 
-                font_size=60,
-                width=width,
-                height=height,
-                position=(0.5, 0.5),
-                color=quote_color
-            )
-            
-            # Composite quote onto background
-            img = Image.alpha_composite(img.convert("RGBA"), quote_img).convert("RGB")
-            
-            # Render author after quote is mostly visible
-            if frame_progress > 0.7:
-                author_opacity = min(1.0, (frame_progress - 0.7) / 0.2)
-                author_color = BRAND_COLORS["light_grey"][:3] + (int(255 * author_opacity),)
-                
-                author_text = f"— {author}"
-                author_img = self.text_renderer.render_text(
-                    author_text,
-                    font_size=40,
-                    width=width,
-                    height=height,
-                    position=(0.7, 0.8),  # Bottom right
-                    color=author_color
-                )
-                
-                img = Image.alpha_composite(img.convert("RGBA"), author_img).convert("RGB")
-            
-            # Render brand watermark (always visible but subtle)
-            brand_opacity = 180
-            brand_img = self.text_renderer.render_text(
-                "@stillmind",
-                font_size=30,
-                width=width,
-                height=height,
-                position=(0.1, 0.9),  # Bottom left
-                color=BRAND_COLORS["medium_grey"][:3] + (brand_opacity,)
-            )
-            
-            img = Image.alpha_composite(img.convert("RGBA"), brand_img).convert("RGB")
-        
-        return img
-    
-    def create_mp4_video(self,
-                        quote_text: str,
-                        author: str,
-                        size: Tuple[int, int],
-                        bg_style: str) -> bytes:
-        """Create MP4 video with high-quality encoding"""
-        width, height = size
-        total_frames = self.config.total_frames
-        fps = self.config.fps
-        
-        # Generate all frames
         frames = []
+        
         for frame_num in range(total_frames):
-            time_offset = frame_num / fps
-            frame_progress = min(1.0, frame_num / total_frames)
+            t = frame_num / fps
             
-            frame = self.create_frame(
-                quote_text, author, size, bg_style, frame_progress, time_offset
+            # 1. Generate seamless background
+            bg = self.loop_engine.create_seamless_background(
+                width, height, t, duration, style
             )
             
-            # Convert to numpy array for video encoding
-            frame_np = np.array(frame)
+            # 2. Apply engagement hooks
+            bg = self.hooks_engine.apply_all_hooks(bg, t, duration)
+            
+            # 3. Render text with animations
+            bg = self.text_renderer.render_text(bg, quote, author, t, duration)
+            
+            # Convert to numpy array
+            frame_np = np.array(bg.convert("RGB"))
             frames.append(frame_np)
         
         # Encode to MP4 with high-quality settings
@@ -696,124 +549,19 @@ class VectorizedAnimationGenerator:
             format='mp4',
             fps=fps,
             codec='libx264',
-            quality=9,  # Higher quality (0-10 scale)
-            pixelformat=self.config.pixel_format,
-            bitrate=self.config.bitrate
+            quality=9,
+            pixelformat=VIDEO_CONFIG["pixel_format"],
+            bitrate=VIDEO_CONFIG["bitrate"],
+            output_params=["-preset", "slow"]  # Better compression
         )
         
         return buffer.getvalue()
 
 # ============================================================================
-# QUOTE MANAGER
-# ============================================================================
-class QuoteManager:
-    """Fetch quotes from API with caching"""
-    
-    @staticmethod
-    @st.cache_data(ttl=3600)
-    def fetch_quote(category="motivation"):
-        """Fetch quote from Quotable API"""
-        try:
-            if category == "random":
-                url = "https://api.quotable.io/random"
-            else:
-                url = f"https://api.quotable.io/quotes/random?tags={category}&maxLength=120"
-            
-            response = requests.get(url, timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                if isinstance(data, list):
-                    data = data[0]
-                
-                return {
-                    "text": data["content"],
-                    "author": data["author"],
-                    "category": category,
-                    "source": "Quotable API"
-                }
-        except:
-            pass
-        
-        # Fallback quotes
-        fallback_quotes = [
-            {"text": "TRUST YOURSELF", "author": "Still Mind"},
-            {"text": "TAKE CARE TO WORK HARD", "author": "Still Mind"},
-            {"text": "DON'T GIVE UP", "author": "Still Mind"},
-        ]
-        
-        return random.choice(fallback_quotes)
-
-# ============================================================================
-# GROQ SOCIAL MEDIA MANAGER
-# ============================================================================
-class SocialMediaManager:
-    """Generate social media content using Groq"""
-    
-    def __init__(self, api_key: str):
-        self.client = Groq(api_key=api_key)
-    
-    def generate_content(self, quote: str, author: str, bg_style: str) -> Dict:
-        """Generate social media post content"""
-        try:
-            prompt = f"""
-            Create a social media post for this quote with the visual style: {bg_style}
-            
-            QUOTE: "{quote}"
-            AUTHOR: {author}
-            VISUAL STYLE: {bg_style}
-            BRAND: @stillmind (mindfulness, wisdom, personal growth)
-            
-            Generate a JSON with:
-            1. caption: Engaging 2-3 line caption with relevant emojis
-            2. hashtags: 5-7 relevant hashtags
-            3. posting_time: Best time to post (consider global audience)
-            4. engagement_hook: One question to ask in comments
-            5. visual_description: Describe the animated visual for screen readers
-            
-            Make it authentic, inspiring, and platform-optimized.
-            """
-            
-            response = self.client.chat.completions.create(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a social media expert for mindfulness and personal growth content."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                model="mixtral-8x7b-32768",
-                temperature=0.7,
-                max_tokens=500,
-                response_format={"type": "json_object"}
-            )
-            
-            content = json.loads(response.choices[0].message.content)
-            content["generated_at"] = datetime.now().isoformat()
-            
-            return content
-            
-        except Exception as e:
-            return self._fallback_content(quote, author, bg_style)
-    
-    def _fallback_content(self, quote: str, author: str, bg_style: str) -> Dict:
-        """Fallback content"""
-        return {
-            "caption": f'"{quote}"\n\n— {author}\n\n✨ @stillmind\n💭 What does this mean to you?',
-            "hashtags": ["#stillmind", "#wisdom", "#quote", "#mindfulness", "#growth"],
-            "posting_time": "7-9 PM GMT",
-            "engagement_hook": "Which part resonates most with you?",
-            "visual_description": f"Animated {bg_style} background with the quote appearing elegantly",
-            "is_fallback": True
-        }
-
-# ============================================================================
-# STREAMLIT UI
+# STREAMLIT INTERFACE
 # ============================================================================
 def main():
-    # Custom CSS
+    # Custom CSS for minimal design
     st.markdown("""
     <style>
     .main-header {
@@ -838,33 +586,26 @@ def main():
         transform: translateY(-2px);
         box-shadow: 0 8px 25px rgba(76, 175, 80, 0.4);
     }
-    .visual-energy-badge {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.9rem;
-        font-weight: 500;
-        margin-right: 8px;
-        margin-bottom: 8px;
+    .style-card {
+        padding: 1rem;
+        border-radius: 12px;
+        margin-bottom: 1rem;
+        border: 2px solid transparent;
+        transition: all 0.3s;
     }
-    .energy-high { background: rgba(76, 175, 80, 0.2); color: #4CAF50; border: 1px solid #4CAF50; }
-    .energy-medium { background: rgba(25, 118, 210, 0.2); color: #1976D2; border: 1px solid #1976D2; }
-    .energy-low { background: rgba(158, 158, 158, 0.2); color: #9E9E9E; border: 1px solid #9E9E9E; }
+    .style-card:hover {
+        border-color: #4CAF50;
+        transform: translateY(-2px);
+    }
     </style>
     """, unsafe_allow_html=True)
-    
-    # Initialize session state
-    if 'current_video' not in st.session_state:
-        st.session_state.current_video = None
-    if 'social_content' not in st.session_state:
-        st.session_state.social_content = None
     
     # Header
     st.markdown("""
     <div class="main-header">
-        <h1 style="color: #4CAF50; margin-bottom: 0.5rem;">🧠 Still Mind | Vectorized Animations</h1>
-        <p style="color: #EEEEEE; opacity: 0.9; margin-bottom: 0.5rem;">High-quality animated quotes with supersampled rendering</p>
-        <p style="color: #9E9E9E; font-size: 0.9rem; margin: 0;">8-second MP4 • 15 FPS • libx264 • yuv420p • 8000k bitrate</p>
+        <h1 style="color: #4CAF50; margin-bottom: 0.5rem;">🧠 Still Mind: Creative Studio</h1>
+        <p style="color: #EEEEEE; opacity: 0.9; margin-bottom: 0.5rem;">Perfect-loop animations with engagement hooks</p>
+        <p style="color: #9E9E9E; font-size: 0.9rem; margin: 0;">8s MP4 • 15 FPS • libx264 • yuv420p • 8000k bitrate</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -872,182 +613,125 @@ def main():
     col1, col2 = st.columns([1, 2])
     
     with col1:
-        st.markdown("### ⚙️ Configuration")
-        
-        # Quote source
-        quote_source = st.radio("Quote Source", ["API", "Custom"], horizontal=True)
-        
-        if quote_source == "API":
-            category = st.selectbox(
-                "Category",
-                ["motivation", "wisdom", "mindfulness", "success", "random"],
-                index=0
-            )
-        else:
-            custom_quote = st.text_area("Your Quote", height=100,
-                                       placeholder="Enter your quote...")
-            custom_author = st.text_input("Author", value="Still Mind")
+        st.markdown("### 🎨 Visual Identity")
         
         # Visual style selection
-        st.markdown("### 🎨 Visual Energy")
-        
-        visual_styles = {
-            "🪶 Flocking Birds": {
-                "description": "V-shaped silhouettes gliding across the frame",
-                "energy": "high",
-                "color": "energy-high"
+        styles = {
+            "🟡 Kinetic Bubble": {
+                "description": "Liquid 3D bubble with wobble physics",
+                "energy": "High",
+                "color": "#FFCC00"
             },
-            "📐 Geometric Pulse": {
-                "description": "Lissajous curves & expanding grids at 60bpm rhythm",
-                "energy": "medium",
-                "color": "energy-medium"
+            "🪶 Serene Birds": {
+                "description": "Cinematic depth-of-field birds",
+                "energy": "Medium",
+                "color": "#0d1b2a"
             },
-            "🌿 Organic Growth": {
-                "description": "Procedural vine growth with popping leaves",
-                "energy": "low",
-                "color": "energy-low"
+            "🔵 Modern Frame": {
+                "description": "Floating glass frame with physics",
+                "energy": "Low",
+                "color": "#64B4FF"
             },
-            "⚪ Circle Card": {
-                "description": "Brand yellow with pulsing central circle",
-                "energy": "medium",
-                "color": "energy-medium"
-            },
-            "🟦 Rectangle Card": {
-                "description": "Sky blue with floating rectangular card",
-                "energy": "low",
-                "color": "energy-low"
+            "📐 Digital Loom": {
+                "description": "Geometric network with Lissajous curves",
+                "energy": "High",
+                "color": "#050f19"
             },
             "✨ Aura Orbs": {
-                "description": "Vectorized aura orbs with Gaussian blur gradients",
-                "energy": "high",
-                "color": "energy-high"
+                "description": "Vectorized orbs with Gaussian blur gradients",
+                "energy": "Medium",
+                "color": "#4CAF50"
             }
         }
         
-        selected_style = st.selectbox("Visual Style", list(visual_styles.keys()), index=0)
+        selected_style = st.selectbox("Select Style", list(styles.keys()))
         
-        # Show style description and energy
-        style_info = visual_styles[selected_style]
-        st.markdown(f'<div class="visual-energy-badge {style_info["color"]}">{style_info["energy"].title()} Energy</div>', 
-                   unsafe_allow_html=True)
-        st.caption(style_info["description"])
+        # Show style info
+        style_info = styles[selected_style]
+        st.markdown(f"**Description:** {style_info['description']}")
+        st.markdown(f"**Energy Level:** {style_info['energy']}")
         
-        # Size format
+        # Quote input
+        st.markdown("### 💬 Content")
+        
+        default_quote = "TRUST YOURSELF\nTAKE CARE TO WORK HARD\nDON'T GIVE UP"
+        quote = st.text_area("Quote (use Enter for line breaks)", 
+                           value=default_quote,
+                           height=120)
+        
+        author = st.text_input("Author", value="Still Mind")
+        
+        # Size selection
         size_option = st.selectbox("Size Format", list(SIZES.keys()), index=0)
         
         # Generate button
-        if st.button("✨ GENERATE VECTORIZED ANIMATION", type="primary"):
-            with st.spinner("Rendering supersampled frames..."):
-                # Get quote
-                if quote_source == "API":
-                    quote_data = QuoteManager.fetch_quote(category)
-                    quote_text = quote_data["text"]
-                    author = quote_data["author"]
-                else:
-                    quote_text = custom_quote.strip()
-                    author = custom_author.strip() or "Still Mind"
-                
-                if not quote_text:
-                    st.error("Please enter a quote")
-                    return
-                
-                # Generate video
-                generator = VectorizedAnimationGenerator()
-                video_data = generator.create_mp4_video(
-                    quote_text,
+        if st.button("🚀 RENDER PERFECT-LOOP VIDEO", type="primary"):
+            with st.spinner("Generating seamless animation..."):
+                generator = VideoGenerator()
+                video_data = generator.create_video(
+                    quote,
                     author,
                     SIZES[size_option],
                     selected_style
                 )
                 
-                # Store in session state
-                st.session_state.current_video = video_data
-                st.session_state.current_quote = {
-                    "text": quote_text,
-                    "author": author,
-                    "style": selected_style
-                }
-                
-                # Generate social media content if API key available
-                try:
-                    groq_key = st.secrets["groq_key"]
-                    sm_manager = SocialMediaManager(groq_key)
-                    st.session_state.social_content = sm_manager.generate_content(
-                        quote_text, author, selected_style
-                    )
-                except:
-                    st.session_state.social_content = None
-                
-                st.success("✅ Vectorized animation complete!")
+                st.session_state.video_data = video_data
+                st.session_state.quote = quote
+                st.session_state.style = selected_style
     
     with col2:
         # Preview section
-        if st.session_state.current_video:
+        if 'video_data' in st.session_state:
             st.markdown("### 🎬 Preview")
             
             # Video player
-            st.video(st.session_state.current_video, format="video/mp4", start_time=0)
+            st.video(st.session_state.video_data, format="video/mp4", start_time=0)
             
             # Technical specs
             col_spec1, col_spec2, col_spec3, col_spec4 = st.columns(4)
             with col_spec1:
-                st.metric("Duration", "8s")
+                st.metric("Loop", "Perfect")
             with col_spec2:
-                st.metric("FPS", "15")
+                st.metric("Duration", "8s")
             with col_spec3:
-                st.metric("Codec", "H.264")
+                st.metric("FPS", "15")
             with col_spec4:
-                st.metric("Quality", "High")
+                st.metric("Bitrate", "8000k")
             
-            # Download buttons
+            # Download button
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            style_slug = st.session_state.style.replace(' ', '_').lower()
+            
             st.download_button(
-                label="📥 DOWNLOAD MP4 (High Quality)",
-                data=st.session_state.current_video,
-                file_name=f"stillmind_{selected_style.replace(' ', '_').lower()}_{timestamp}.mp4",
+                label="📥 DOWNLOAD MP4",
+                data=st.session_state.video_data,
+                file_name=f"stillmind_{style_slug}_{timestamp}.mp4",
                 mime="video/mp4",
                 use_container_width=True
             )
             
-            # Social media section
+            # Engagement hooks info
             st.markdown("---")
-            st.markdown("### 📱 Social Media Content")
+            st.markdown("### 🔧 Engagement Hooks Applied")
             
-            if st.session_state.social_content:
-                content = st.session_state.social_content
-                
-                # Caption
-                st.text_area("📝 Caption", content.get("caption", ""), height=150)
-                
-                # Hashtags
-                hashtags = content.get("hashtags", [])
-                hashtag_str = ' '.join(f"#{tag}" for tag in hashtags)
-                st.code(hashtag_str)
-                
-                # Additional info
-                col_info1, col_info2 = st.columns(2)
-                with col_info1:
-                    st.write(f"**⏰ Best Time:** {content.get('posting_time', 'N/A')}")
-                with col_info2:
-                    st.write(f"**💬 Engagement:** {content.get('engagement_hook', 'N/A')}")
-                
-                # Visual description for accessibility
-                st.write(f"**👁️ Visual Description:** {content.get('visual_description', 'N/A')}")
-            else:
-                st.info("🔑 Add `groq_key` to Streamlit secrets for AI-powered social content")
-                
-                # Show basic template
-                st.text_area("📝 Caption Template", 
-                           f'"{st.session_state.current_quote["text"]}"\n\n— {st.session_state.current_quote["author"]}\n\n✨ @stillmind\n💭 What resonates with you?',
-                           height=150)
-                st.code("#stillmind #wisdom #quote #mindfulness #growth")
+            hooks_col1, hooks_col2, hooks_col3 = st.columns(3)
+            with hooks_col1:
+                st.markdown("**Opening Hook**")
+                st.caption("0.5s progressive blur for instant focus")
+            with hooks_col2:
+                st.markdown("**Depth Particles**")
+                st.caption("3D illusion with layered movement")
+            with hooks_col3:
+                st.markdown("**Chromatic Aberration**")
+                st.caption("Cinematic lens color fringing")
             
             # Quick actions
             st.markdown("---")
             col_action1, col_action2 = st.columns(2)
             with col_action1:
                 if st.button("🔄 New Animation", use_container_width=True):
-                    st.session_state.current_video = None
+                    if 'video_data' in st.session_state:
+                        del st.session_state.video_data
                     st.rerun()
             with col_action2:
                 if st.button("🎲 Random Style", use_container_width=True):
@@ -1058,8 +742,8 @@ def main():
             st.markdown("""
             <div style="text-align: center; padding: 4rem; color: #9E9E9E; background: rgba(13, 27, 42, 0.5); border-radius: 16px;">
                 <h3>👆 Configure & Generate</h3>
-                <p>Select visual energy style and generate your first vectorized animation.</p>
-                <p style="font-size: 0.9rem; opacity: 0.7;">Each style uses different mathematical principles for animation</p>
+                <p>Select visual style and enter your quote to create a perfect-loop animation.</p>
+                <p style="font-size: 0.9rem; opacity: 0.7;">Each animation uses mathematical loops that seamlessly repeat</p>
             </div>
             """, unsafe_allow_html=True)
     
@@ -1067,8 +751,8 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style="text-align: center; color: #616161; padding: 2rem 0; font-size: 0.9rem;">
-        <p>🧠 Still Mind • Vectorized Animations • Supersampled Rendering • High-Quality MP4 Export</p>
-        <p style="font-size: 0.8rem; opacity: 0.7;">libx264 • yuv420p • 8000k bitrate • Lanczos downscaling • Gaussian blur gradients</p>
+        <p>🧠 Still Mind • Creative Studio • Perfect-Loop Animations • Engagement Hooks</p>
+        <p style="font-size: 0.8rem; opacity: 0.7;">Mathematical loops • Chromatic aberration • Depth particles • Gaussian blur gradients</p>
     </div>
     """, unsafe_allow_html=True)
 
