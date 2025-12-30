@@ -1,551 +1,463 @@
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-import io, os, requests, math, time
+import io, os, requests, math, time, random
 import numpy as np
 from moviepy.editor import VideoClip
-import random
 
 # ============================================================================
-# STREAMLIT SETUP
+# MASTER THEME (Green, Navy Blue, White, Grey)
 # ============================================================================
-st.set_page_config(
-    page_title="Still Mind Nature",
-    page_icon="🌿",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="Still Mind Studio", layout="wide")
 
-# ============================================================================
-# NATURE THEME SYSTEM
-# ============================================================================
-THEMES = {
-    "Forest Sunrise": {
-        "dawn": {
-            "sky": [(10, 25, 35, 255), (80, 40, 60, 255)],  # Night to dawn purple
-            "light": (255, 200, 0, 180),  # Golden sunlight
-            "tree": (30, 80, 40, 255),  # Deep green
-            "water": (40, 100, 150, 120)
-        },
-        "day": {
-            "sky": [(80, 40, 60, 255), (200, 100, 50, 255)],  # Dawn to sunrise
-            "light": (255, 220, 120, 255),  # Bright sunlight
-            "tree": (60, 140, 80, 255),  # Bright green
-            "water": (80, 150, 180, 180)
-        },
-        "accent": (76, 175, 80, 255),
-        "text": (255, 255, 255, 255)
-    },
-    "Ocean Twilight": {
-        "dawn": {
-            "sky": [(20, 30, 60, 255), (60, 40, 100, 255)],  # Deep blue to purple
-            "light": (100, 200, 255, 180),  # Blue light
-            "tree": (20, 60, 80, 255),
-            "water": (30, 80, 120, 150)
-        },
-        "day": {
-            "sky": [(60, 40, 100, 255), (150, 100, 200, 255)],
-            "light": (180, 140, 255, 255),
-            "tree": (40, 100, 120, 255),
-            "water": (60, 120, 160, 200)
-        },
-        "accent": (0, 200, 200, 255),
-        "text": (255, 255, 255, 255)
-    },
-    "Mountain Mist": {
-        "dawn": {
-            "sky": [(25, 35, 45, 255), (60, 70, 90, 255)],
-            "light": (200, 220, 240, 150),
-            "tree": (40, 60, 50, 255),
-            "water": (50, 80, 90, 130)
-        },
-        "day": {
-            "sky": [(60, 70, 90, 255), (120, 140, 160, 255)],
-            "light": (240, 245, 250, 220),
-            "tree": (80, 100, 90, 255),
-            "water": (80, 120, 130, 180)
-        },
-        "accent": (140, 180, 170, 255),
-        "text": (255, 255, 255, 255)
-    }
-}
-
-SIZES = {
-    "TikTok (1080x1920)": (1080, 1920),
-    "Instagram (1080x1080)": (1080, 1080),
-    "Stories (1080x1350)": (1080, 1350),
-    "Desktop (1920x1200)": (1920, 1200)
+THEME = {
+    "navy": (10, 25, 45, 255),       # Deep Navy
+    "navy_light": (30, 50, 80, 255),  # Light Navy for gradients
+    "grey_dawn": (100, 110, 120, 255), # Dawn Grey
+    "grey_light": (140, 150, 160, 255),
+    "forest": (46, 125, 50, 255),    # Deep Green
+    "forest_light": (76, 175, 80, 255), # Light Green
+    "white": (255, 255, 255, 255),
+    "white_trans": (255, 255, 255, 180),
+    "river": (20, 40, 70, 180),      # Translucent Navy
+    "river_light": (40, 80, 120, 220)
 }
 
 # ============================================================================
-# ORGANIC NATURE GENERATORS
+# UTILITY FUNCTIONS
 # ============================================================================
+def safe_coords(x, y, size, width, height):
+    """Ensure coordinates are valid for drawing."""
+    x1 = max(0, int(x - size))
+    y1 = max(0, int(y - size))
+    x2 = min(width - 1, int(x + size))
+    y2 = min(height - 1, int(y + size))
+    
+    # Ensure x1 < x2 and y1 < y2
+    if x1 >= x2:
+        x1, x2 = min(x1, x2), max(x1, x2)
+        if x1 == x2:
+            x2 += 1
+    if y1 >= y2:
+        y1, y2 = min(y1, y2), max(y1, y2)
+        if y1 == y2:
+            y2 += 1
+    
+    return [x1, y1, x2, y2]
+
 def interpolate_color(color1, color2, progress):
-    """Smooth color transition between two RGBA colors."""
-    r1, g1, b1, a1 = color1
-    r2, g2, b2, a2 = color2
-    r = int(r1 + (r2 - r1) * progress)
-    g = int(g1 + (g2 - g1) * progress)
-    b = int(b1 + (b2 - b1) * progress)
-    a = int(a1 + (a2 - a1) * progress)
-    return (r, g, b, a)
+    """Smooth color transition."""
+    return tuple(int(color1[i] + (color2[i] - color1[i]) * progress) for i in range(4))
 
-def draw_fractal_tree(draw, x, y, angle, length, depth, time_offset, wind_strength, colors):
-    """Recursive tree with wind animation and seasonal colors."""
-    if depth <= 0 or length < 2:
-        return
-    
-    # Wind sway with natural variation
-    wind_sway = wind_strength * math.sin(time_offset * 1.5 + depth * 0.3) * (0.2 / max(1, depth - 2))
-    branch_angle = angle + wind_sway
-    
-    # Calculate end point
-    x2 = x + math.cos(branch_angle) * length
-    y2 = y + math.sin(branch_angle) * length
-    
-    # Branch thickness decreases with depth
-    thickness = max(1, depth * 2)
-    
-    # Color variation through depth (trunk to leaves)
-    if depth > 3:  # Trunk/branches
-        branch_color = colors["tree"][:3] + (200,)
-    else:  # Leaves/twigs
-        leaf_variation = int(40 * math.sin(time_offset + depth))
-        leaf_color = (
-            min(255, colors["tree"][0] + leaf_variation),
-            min(255, colors["tree"][1] + leaf_variation),
-            min(255, colors["tree"][2] + leaf_variation),
-            180
-        )
-        branch_color = leaf_color
-    
-    # Draw branch
-    draw.line([(x, y), (x2, y2)], fill=branch_color, width=thickness)
-    
-    # Branch randomness for organic feel
-    branch_randomness = 0.3 + 0.2 * math.sin(time_offset + depth)
-    
-    # Recursive branches
-    if depth > 1:
-        # Left branch
-        left_angle = branch_angle - (0.45 * branch_randomness)
-        left_length = length * (0.65 + 0.1 * math.sin(time_offset + depth))
-        draw_fractal_tree(draw, x2, y2, left_angle, left_length, depth - 1, 
-                         time_offset, wind_strength, colors)
-        
-        # Right branch
-        right_angle = branch_angle + (0.45 * branch_randomness)
-        right_length = length * (0.65 + 0.1 * math.cos(time_offset + depth))
-        draw_fractal_tree(draw, x2, y2, right_angle, right_length, depth - 1, 
-                         time_offset, wind_strength, colors)
-        
-        # Occasionally add a third branch for fuller trees
-        if depth > 2 and random.random() > 0.7:
-            middle_angle = branch_angle + (0.1 * math.sin(time_offset))
-            middle_length = length * 0.5
-            draw_fractal_tree(draw, x2, y2, middle_angle, middle_length, 
-                             depth - 2, time_offset, wind_strength, colors)
+def load_font_safe(size, bold=False):
+    """Load font with fallbacks."""
+    try:
+        if bold:
+            return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size)
+        else:
+            return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
+    except:
+        try:
+            if bold:
+                return ImageFont.truetype("arialbd.ttf", size)
+            else:
+                return ImageFont.truetype("arial.ttf", size)
+        except:
+            return ImageFont.load_default(size)
 
-def draw_ocean_waves(draw, width, height, time_offset, colors):
-    """Organic wave patterns with light interaction."""
-    for wave_layer in range(4):  # Multiple wave layers for depth
-        wave_height = 120 + wave_layer * 20
-        wave_points = [(0, height)]
-        
-        # Wave frequency and amplitude variations
-        freq1 = 0.003 + wave_layer * 0.001
-        freq2 = 0.008 + wave_layer * 0.002
-        amp1 = 15 + wave_layer * 3
-        amp2 = 8 + wave_layer * 2
-        
-        for x in range(0, width + 50, 25):
-            # Combined sine waves for organic movement
-            y_offset = (wave_layer * 25)
-            y_wave = amp1 * math.sin(freq1 * x + time_offset * 2 + wave_layer)
-            y_wave += amp2 * math.sin(freq2 * x - time_offset * 1.7 + wave_layer * 1.3)
-            y_wave += 5 * math.sin(0.02 * x + time_offset * 0.5)
-            
-            y = height - wave_height + y_offset + y_wave
-            wave_points.append((x, y))
-        
-        wave_points.append((width, height))
-        
-        # Wave color with depth variation
-        wave_color = interpolate_color(
-            colors["water"],
-            colors["light"],
-            wave_layer * 0.2
-        )
-        
-        # Draw wave polygon
-        draw.polygon(wave_points, fill=wave_color)
-
-def draw_stars(draw, width, height, time_offset, dawn_progress):
-    """Twinkling stars that fade at dawn."""
-    # Stars become less visible as dawn progresses
-    star_opacity = int(255 * (1 - dawn_progress))
-    
-    if star_opacity > 0:
-        # Draw background stars (small, faint)
-        for i in range(60):
-            # Star positions based on pseudo-random but consistent placement
-            angle = i * 0.1
-            radius = 0.3 + 0.2 * math.sin(i)
-            x = width * (0.5 + radius * math.cos(angle + time_offset * 0.05))
-            y = height * (0.3 + radius * math.sin(angle + time_offset * 0.07))
-            
-            # Twinkling effect
-            twinkle = abs(math.sin(time_offset * 3 + i)) * 0.5 + 0.5
-            size = 1 + int(2 * twinkle)
-            opacity = int(star_opacity * (0.3 + 0.7 * twinkle))
-            
-            draw.ellipse([x-size, y-size, x+size, y+size], 
-                        fill=(255, 255, 255, opacity))
-        
-        # Draw a few brighter stars
-        for i in range(8):
-            angle = i * 0.8
-            radius = 0.4 + 0.3 * math.cos(i)
-            x = width * (0.5 + radius * math.cos(angle + time_offset * 0.03))
-            y = height * (0.3 + radius * math.sin(angle + time_offset * 0.04))
-            
-            twinkle = abs(math.sin(time_offset * 2 + i * 0.5))
-            size = 2 + int(3 * twinkle)
-            opacity = int(star_opacity * (0.6 + 0.4 * twinkle))
-            
-            # Add glow around bright stars
-            glow_size = size + 3
-            draw.ellipse([x-glow_size, y-glow_size, x+glow_size, y+glow_size],
-                        fill=(255, 255, 255, opacity // 3))
-            draw.ellipse([x-size, y-size, x+size, y+size],
-                        fill=(255, 255, 255, opacity))
-
-def draw_glass_ui(draw, img, x1, y1, x2, y2, accent_color, dawn_progress, time_offset):
-    """Frosted glass effect UI with natural elements."""
-    # Crop and blur area for glass effect
-    glass_region = img.crop((x1-20, y1-20, x2+20, y2+20))
-    glass_region = glass_region.filter(ImageFilter.GaussianBlur(radius=15))
-    img.paste(glass_region, (x1-20, y1-20))
-    
-    # Glass overlay with varying opacity based on dawn
-    glass_opacity = int(180 + 75 * math.sin(time_offset * 0.5))
-    draw.rectangle([x1, y1, x2, y2], 
-                  fill=(20, 30, 40, glass_opacity))
-    
-    # Subtle border with dawn glow
-    border_glow = interpolate_color(
-        (76, 175, 80, 100),
-        (255, 200, 0, 150),
-        dawn_progress
-    )
-    draw.rectangle([x1, y1, x2, y2], 
-                  outline=border_glow, 
-                  width=3)
-    
-    # Natural corner decorations (leaf/vine inspired)
-    corner_size = 40
-    leaf_color = interpolate_color(
-        accent_color,
-        (255, 220, 100, 255),
-        dawn_progress
-    )
-    
-    def draw_natural_corner(cx, cy, rotation):
-        # Draw vine-like corner decoration
-        points = []
-        for i in range(5):
-            angle = rotation + i * 0.3
-            px = cx + corner_size * math.cos(angle) * (1 - i * 0.15)
-            py = cy + corner_size * math.sin(angle) * (1 - i * 0.15)
-            points.append((px, py))
-        
-        # Draw leaf shapes
-        for point in points:
-            leaf_size = 8 + 4 * math.sin(time_offset + point[0] * 0.01)
-            draw.ellipse([point[0]-leaf_size, point[1]-leaf_size,
-                         point[0]+leaf_size, point[1]+leaf_size],
-                        fill=leaf_color[:3] + (180,))
-    
-    # Draw corners
-    draw_natural_corner(x1, y1, math.pi)  # Top-left
-    draw_natural_corner(x2, y1, -math.pi/2)  # Top-right
-    draw_natural_corner(x1, y2, math.pi/2)  # Bottom-left
-    draw_natural_corner(x2, y2, 0)  # Bottom-right
-
-# ============================================================================
-# FONT MANAGEMENT
-# ============================================================================
-def load_natural_font(size, bold=False):
-    """Load a font that fits natural themes."""
-    font_paths = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "/System/Library/Fonts/Helvetica.ttc"
-    ]
-    
-    if bold:
-        font_paths = [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-            "C:/Windows/Fonts/arialbd.ttf",
-            "/System/Library/Fonts/Helvetica-Bold.ttc"
-        ]
-    
-    for font_path in font_paths:
-        if os.path.exists(font_path):
-            try:
-                return ImageFont.truetype(font_path, size)
-            except:
-                continue
-    
-    return ImageFont.load_default(size)
-
-# ============================================================================
-# BIBLE VERSE FETCHING
-# ============================================================================
 @st.cache_data(ttl=3600)
-def fetch_bible_verse(book, chapter, verse):
-    """Fetch verse with fallback to natural-themed verses."""
+def fetch_verse(book, chapter, verse):
+    """Fetch Bible verse with caching."""
     try:
         url = f"https://bible-api.com/{book}+{chapter}:{verse}"
         response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            text = data.get("text", "").replace("\n", " ").strip()
-            return text, data.get("reference", f"{book} {chapter}:{verse}")
+        data = response.json()
+        text = data.get("text", "The Lord is my shepherd; I shall not want.").strip().replace("\n", " ")
+        return text
     except:
-        pass
-    
-    # Natural-themed fallback verses
-    fallback_verses = [
-        "Be still, and know that I am God.",
-        "The Lord is my shepherd; I shall not want.",
-        "He makes me lie down in green pastures.",
-        "Peace I leave with you; my peace I give to you.",
-        "Consider the lilies of the field, how they grow.",
-        "The trees of the Lord are watered abundantly.",
-        "Let the sea roar, and all that fills it."
-    ]
-    
-    text = random.choice(fallback_verses)
-    return text, f"{book} {chapter}:{verse}"
+        return "The Lord is my shepherd; I shall not want. He makes me lie down in green pastures."
 
 # ============================================================================
-# MAIN IMAGE GENERATION
+# ENHANCED NATURE ANIMATIONS
 # ============================================================================
-def create_nature_scene(width, height, theme_name, book, chapter, verse, 
-                       hook, dawn_progress=0.0, time_offset=0, is_video=False):
-    """Create a complete nature scene with dawn progression."""
-    theme = THEMES[theme_name]
+def draw_birds_and_reflections(draw, w, h, t):
+    """Draw flying birds with reflections."""
+    for i in range(4):
+        # Flying path with variation
+        base_x = (t * 200) % (w + 300) - 150
+        bird_x = base_x + (i * 80) + math.sin(t * 3 + i) * 30
+        bird_y = h * 0.25 + (math.sin(t * 2 + i * 0.5) * 40)
+        
+        # Wing flap animation
+        flap_speed = 14 + i * 2
+        flap = math.sin(t * flap_speed) * 10
+        
+        # Draw bird (white with alpha)
+        bird_color = THEME["white_trans"]
+        wing_length = 12
+        
+        # Bird body (simple V shape)
+        draw.line([(bird_x, bird_y), (bird_x - wing_length, bird_y - 5 + flap)], 
+                 fill=bird_color, width=3)
+        draw.line([(bird_x, bird_y), (bird_x + wing_length, bird_y - 5 + flap)], 
+                 fill=bird_color, width=3)
+        
+        # Bird reflection on water
+        reflection_y = h - bird_y + 180  # Reflection position
+        if reflection_y > h * 0.6:  # Only draw if in water area
+            # Water distortion effect
+            distortion = math.sin(t * 8 + i) * 15
+            ref_opacity = 60 - i * 10  # Fade reflections in distance
+            
+            reflection_color = (200, 210, 220, ref_opacity)
+            draw.line([(bird_x + distortion, reflection_y), 
+                      (bird_x - wing_length + distortion, reflection_y + 3 - flap/2)], 
+                     fill=reflection_color, width=1)
+            draw.line([(bird_x + distortion, reflection_y), 
+                      (bird_x + wing_length + distortion, reflection_y + 3 - flap/2)], 
+                     fill=reflection_color, width=1)
+
+def draw_fractal_tree(draw, x, y, angle, length, depth, t, max_depth, color):
+    """Draw organic tree with growth animation."""
+    if depth <= 0:
+        return
     
-    # Interpolate colors based on dawn progress
-    dawn_colors = theme["dawn"]
-    day_colors = theme["day"]
+    # Calculate growth progress
+    time_per_branch = 0.3
+    delay = (max_depth - depth) * time_per_branch
+    growth_progress = max(0, min(1, (t - delay) / 2.0))
     
-    current_colors = {}
-    for key in dawn_colors:
-        if isinstance(dawn_colors[key][0], (list, tuple)) and len(dawn_colors[key][0]) == 4:
-            # Handle gradient tuples
-            start_grad = dawn_colors[key]
-            end_grad = day_colors[key]
-            current_colors[key] = (
-                interpolate_color(start_grad[0], end_grad[0], dawn_progress),
-                interpolate_color(start_grad[1], end_grad[1], dawn_progress)
+    if growth_progress <= 0:
+        return
+    
+    # Natural wind sway (stronger at tips)
+    wind_strength = 0.8 + 0.4 * math.sin(t * 0.5)
+    sway = math.sin(t * 1.8 + depth * 0.7) * (0.15 / max(1, depth - 1)) * wind_strength
+    
+    # Animated length
+    current_length = length * growth_progress
+    
+    # Calculate branch end
+    x2 = x + math.cos(angle + sway) * current_length
+    y2 = y + math.sin(angle + sway) * current_length
+    
+    # Determine color (trunk vs leaves)
+    if depth > 4:  # Trunk/branches
+        branch_color = THEME["grey_dawn"][:3] + (int(200 * growth_progress),)
+        thickness = depth * 2
+    else:  # Leaves/twigs
+        # Add seasonal color variation
+        seasonal_shift = int(30 * math.sin(t * 0.3 + depth))
+        leaf_color = (
+            min(255, color[0] + seasonal_shift),
+            min(255, color[1] + seasonal_shift),
+            min(255, color[2]),
+            int(180 * growth_progress)
+        )
+        branch_color = leaf_color
+        thickness = max(1, depth * 1.5)
+    
+    # Draw the branch
+    draw.line([(int(x), int(y)), (int(x2), int(y2))], 
+             fill=branch_color, width=int(thickness))
+    
+    # Recursive branches with variation
+    if depth > 1:
+        # Left branch
+        left_angle = angle - (0.42 + 0.1 * math.sin(t + depth))
+        left_length = current_length * (0.7 + 0.1 * math.cos(t + depth))
+        draw_fractal_tree(draw, x2, y2, left_angle, left_length, 
+                         depth - 1, t, max_depth, color)
+        
+        # Right branch
+        right_angle = angle + (0.42 + 0.1 * math.cos(t + depth))
+        right_length = current_length * (0.7 + 0.1 * math.sin(t + depth))
+        draw_fractal_tree(draw, x2, y2, right_angle, right_length, 
+                         depth - 1, t, max_depth, color)
+        
+        # Occasionally add third branch for fuller trees
+        if depth > 3 and random.random() > 0.6:
+            middle_angle = angle + (0.1 * math.sin(t * 2))
+            middle_length = current_length * 0.5
+            draw_fractal_tree(draw, x2, y2, middle_angle, middle_length, 
+                             depth - 2, t, max_depth, color)
+
+def draw_river_with_reflections(draw, w, h, t):
+    """Draw flowing river with reflections."""
+    river_points = []
+    
+    # Generate left bank points
+    for y in range(int(h * 0.5), h + 20, 20):
+        # River width variation
+        width_variation = math.sin(y * 0.01 - t * 3) * 60
+        
+        # Perspective effect (river narrows as it goes up)
+        perspective = (y - h * 0.5) * 1.5
+        
+        left_x = w//2 - 200 - perspective + width_variation
+        river_points.append((int(left_x), int(y)))
+    
+    # Generate right bank points (in reverse)
+    right_points = []
+    for y in range(int(h * 0.5), h + 20, 20):
+        width_variation = math.sin(y * 0.01 - t * 3 + math.pi) * 60
+        perspective = (y - h * 0.5) * 1.5
+        right_x = w//2 + 200 + perspective + width_variation
+        right_points.append((int(right_x), int(y)))
+    
+    # Combine points for polygon (close the shape)
+    all_points = river_points + right_points[::-1]
+    
+    if len(all_points) > 2:
+        # Draw river with gradient opacity
+        for i in range(3):
+            river_color = interpolate_color(
+                THEME["river"],
+                THEME["river_light"],
+                i / 3
             )
-        else:
-            current_colors[key] = interpolate_color(
-                dawn_colors[key], 
-                day_colors[key], 
-                dawn_progress
-            )
+            
+            # Offset each layer for depth
+            offset_points = [(x + i * 3, y + i * 2) for x, y in all_points]
+            draw.polygon(offset_points, fill=river_color)
     
-    current_colors["accent"] = theme["accent"]
-    current_colors["text"] = theme["text"]
+    # Add river highlights (sun reflection)
+    highlight_y = int(h * 0.75)
+    highlight_width = 100 + int(50 * math.sin(t * 2))
     
-    # Create base image
-    img = Image.new("RGBA", (width, height))
+    for i in range(3):
+        highlight_opacity = 30 - i * 10
+        highlight_points = [
+            (w//2 - highlight_width, highlight_y + i * 10),
+            (w//2 + highlight_width, highlight_y + i * 10),
+            (w//2 + highlight_width//2, highlight_y + 30 + i * 10),
+            (w//2 - highlight_width//2, highlight_y + 30 + i * 10)
+        ]
+        draw.polygon(highlight_points, 
+                    fill=(255, 255, 255, highlight_opacity))
+
+def draw_clouds(draw, w, h, t):
+    """Draw subtle clouds."""
+    for i in range(3):
+        cloud_x = w * (0.2 + i * 0.3) + t * 20
+        cloud_y = h * 0.15 + math.sin(t + i) * 20
+        
+        # Draw cloud as overlapping circles
+        for j in range(5):
+            offset_x = cloud_x + j * 40 + math.sin(t * 0.5 + j) * 20
+            offset_y = cloud_y + math.cos(t * 0.7 + j) * 15
+            size = 60 + math.sin(t * 0.3 + j) * 20
+            
+            bbox = safe_coords(offset_x, offset_y, size, w, h)
+            if bbox[0] < bbox[2] and bbox[1] < bbox[3]:
+                draw.ellipse(bbox, fill=(255, 255, 255, 40))
+
+# ============================================================================
+# MAIN COMPOSITION ENGINE
+# ============================================================================
+def create_master_frame(w, h, book, chapter, verse_num, hook, t=0, is_video=False, duration=6):
+    """Create the complete composition."""
+    # Time progress for animations
+    time_progress = t / duration if duration > 0 else 0
+    
+    # 1. Background with Dawn Progression
+    if time_progress < 0.5:
+        # Night to dawn
+        dawn_progress = time_progress * 2
+        bg_color = interpolate_color(THEME["navy"], THEME["grey_dawn"], dawn_progress)
+    else:
+        # Dawn to morning
+        morning_progress = (time_progress - 0.5) * 2
+        bg_color = interpolate_color(THEME["grey_dawn"], THEME["navy_light"], morning_progress)
+    
+    img = Image.new("RGBA", (w, h), bg_color)
     draw = ImageDraw.Draw(img)
     
-    # Draw sky gradient
-    sky_start, sky_end = current_colors["sky"]
-    for y in range(height):
-        ratio = y / height
-        # Add wave effect to gradient
-        wave = 0.05 * math.sin(y * 0.01 + time_offset * 0.3)
-        ratio = max(0, min(1, ratio + wave))
+    # 2. Sunrise/Sunset Glow
+    if is_video or time_progress > 0:
+        sun_y = h * 0.65 - (time_progress * 320)
+        sun_color = interpolate_color(
+            (255, 255, 255, 100),  # Night white
+            (255, 220, 100, 200),  # Sunrise gold
+            time_progress
+        )
         
-        r = int((1-ratio) * sky_start[0] + ratio * sky_end[0])
-        g = int((1-ratio) * sky_start[1] + ratio * sky_end[1])
-        b = int((1-ratio) * sky_start[2] + ratio * sky_end[2])
-        a = int((1-ratio) * sky_start[3] + ratio * sky_end[3])
-        draw.line([(0, y), (width, y)], fill=(r, g, b, a))
+        # Draw glow layers
+        for r in range(120, 0, -20):
+            alpha = int(60 * (1 - r/120) * time_progress)
+            bbox = safe_coords(w//2, sun_y, r, w, h)
+            if bbox[0] < bbox[2] and bbox[1] < bbox[3]:
+                draw.ellipse(bbox, fill=(255, 255, 255, alpha))
+        
+        # Sun/Moon body
+        sun_size = 40 + int(20 * time_progress)
+        bbox = safe_coords(w//2, sun_y, sun_size, w, h)
+        if bbox[0] < bbox[2] and bbox[1] < bbox[3]:
+            draw.ellipse(bbox, fill=sun_color)
     
-    # Draw stars (fade out with dawn)
-    draw_stars(draw, width, height, time_offset, dawn_progress)
+    # 3. Draw Nature Elements
+    draw_clouds(draw, w, h, t)
+    draw_river_with_reflections(draw, w, h, t)
+    draw_birds_and_reflections(draw, w, h, t)
     
-    # Draw ocean waves
-    draw_ocean_waves(draw, width, height, time_offset, current_colors)
+    # 4. Growing Trees
+    tree_color = interpolate_color(THEME["forest"], THEME["forest_light"], time_progress)
+    draw_fractal_tree(draw, 200, h-20, -math.pi/2, 170, 8, t, 8, tree_color)
+    draw_fractal_tree(draw, w-200, h-20, -math.pi/2, 150, 7, t, 7, tree_color)
     
-    # Draw fractal trees with wind
-    wind_strength = 0.5 + 0.3 * math.sin(time_offset * 0.2)
-    
-    # Left tree
-    draw_fractal_tree(draw, width * 0.2, height - 100, 
-                     -math.pi/2, 130, 8, time_offset, 
-                     wind_strength, current_colors)
-    
-    # Right tree
-    draw_fratcal_tree(draw, width * 0.8, height - 100, 
-                     -math.pi/2, 110, 7, time_offset, 
-                     wind_strength, current_colors)
-    
-    # Draw sun/moon based on dawn progress
-    sun_size = 60 + 40 * dawn_progress
-    sun_x = width * (0.5 + 0.3 * dawn_progress)
-    sun_y = height * 0.25
-    
-    sun_color = interpolate_color(
-        (200, 200, 220, 200),  # Moon-like
-        (255, 220, 100, 255),  # Sun-like
-        dawn_progress
-    )
-    
-    # Sun glow
-    for glow in range(3, 0, -1):
-        glow_size = sun_size + glow * 20
-        glow_opacity = int(100 * (1 - glow * 0.3) * dawn_progress)
-        draw.ellipse([sun_x-glow_size, sun_y-glow_size, 
-                     sun_x+glow_size, sun_y+glow_size],
-                    fill=sun_color[:3] + (glow_opacity,))
-    
-    # Sun/Moon body
-    draw.ellipse([sun_x-sun_size, sun_y-sun_size, 
-                 sun_x+sun_size, sun_y+sun_size],
-                fill=sun_color)
-    
-    # Glass UI Box
+    # 5. FROSTED GLASS TEXT BOX
     box_width = 900
-    box_height = 500
-    box_x = (width - box_width) // 2
-    box_y = (height - box_height) // 2 - 50
+    box_height = 550
+    box_x = (w - box_width) // 2
+    box_y = (h - box_height) // 2 - 100
     
-    draw_glass_ui(draw, img, box_x, box_y, box_x + box_width, box_y + box_height,
-                 current_colors["accent"], dawn_progress, time_offset)
+    # Create frosted glass effect
+    glass_region = img.crop((
+        max(0, box_x - 20),
+        max(0, box_y - 20),
+        min(w, box_x + box_width + 20),
+        min(h, box_y + box_height + 20)
+    ))
     
-    # Get verse text
-    verse_text, reference = fetch_bible_verse(book, chapter, verse)
+    if glass_region.width > 0 and glass_region.height > 0:
+        glass_region = glass_region.filter(ImageFilter.GaussianBlur(15))
+        img.paste(glass_region, (box_x - 20, box_y - 20))
     
-    # Typewriter effect for video
+    # Glass overlay with border
+    draw.rectangle([box_x, box_y, box_x + box_width, box_y + box_height], 
+                  fill=(40, 45, 50, 160), 
+                  outline=(255, 255, 255, 40), 
+                  width=2)
+    
+    # Decorative corners
+    corner_size = 6
+    for cx, cy in [(box_x, box_y), (box_x + box_width, box_y), 
+                   (box_x, box_y + box_height), (box_x + box_width, box_y + box_height)]:
+        # Diamond shape corners
+        points = [
+            (cx, cy - corner_size),
+            (cx + corner_size, cy),
+            (cx, cy + corner_size),
+            (cx - corner_size, cy)
+        ]
+        draw.polygon(points, fill=THEME["forest_light"])
+    
+    # 6. TYPERWRITER TEXT ANIMATION
+    verse_text = fetch_verse(book, chapter, verse_num)
+    
     if is_video:
-        typewriter_duration = 5  # seconds
-        typewriter_progress = min(1.0, time_offset / typewriter_duration)
-        visible_text = verse_text[:int(len(verse_text) * typewriter_progress)]
+        typewriter_duration = 4.5
+        type_progress = min(1.0, t / typewriter_duration)
+        visible_text = verse_text[:int(len(verse_text) * type_progress)]
     else:
+        type_progress = 1.0
         visible_text = verse_text
     
-    # Wrap text
-    verse_font = load_natural_font(50)
+    # Load font
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 48)
+    except:
+        font = load_font_safe(48)
+    
+    # Text wrapping
+    max_text_width = box_width - 100
     words = visible_text.split()
     lines = []
     current_line = []
     
     for word in words:
         test_line = ' '.join(current_line + [word])
-        bbox = verse_font.getbbox(test_line)
-        if bbox[2] - bbox[0] <= box_width - 100:
+        bbox = font.getbbox(test_line) if hasattr(font, 'getbbox') else font.getsize(test_line)
+        text_width = bbox[2] - bbox[0] if hasattr(font, 'getbbox') else bbox[0]
+        
+        if text_width <= max_text_width:
             current_line.append(word)
         else:
-            lines.append(' '.join(current_line))
+            if current_line:
+                lines.append(' '.join(current_line))
             current_line = [word]
     
     if current_line:
         lines.append(' '.join(current_line))
     
-    # Draw verse text
-    line_height = verse_font.getbbox("A")[3] * 1.5
-    text_y = box_y + 60
+    # Draw text lines
+    line_height = 70
+    text_y = box_y + 80
     
     for line in lines:
-        bbox = verse_font.getbbox(line)
-        line_width = bbox[2] - bbox[0]
-        x = (width - line_width) // 2
+        if hasattr(font, 'getbbox'):
+            bbox = font.getbbox(line)
+            text_width = bbox[2] - bbox[0]
+        else:
+            text_width = font.getsize(line)[0]
+        
+        text_x = box_x + (box_width - text_width) // 2
         
         # Text shadow for readability
-        draw.text((x+2, text_y+2), line, 
-                 font=verse_font, fill=(0, 0, 0, 150))
+        draw.text((text_x + 2, text_y + 2), line, 
+                 font=font, fill=(0, 0, 0, 150))
         
         # Main text
-        text_color = current_colors["text"][:3] + (
-            int(255 * (1 if not is_video else min(1.0, time_offset / 2))),
-        )
-        draw.text((x, text_y), line, 
-                 font=verse_font, fill=text_color)
+        text_alpha = int(255 * type_progress) if is_video else 255
+        draw.text((text_x, text_y), line, 
+                 font=font, fill=THEME["white"][:3] + (text_alpha,))
         
         text_y += line_height
     
-    # Draw hook (top)
+    # 7. HEADER HOOK
     if hook:
-        hook_font = load_natural_font(70, bold=True)
-        hook_bbox = hook_font.getbbox(hook.upper())
-        hook_x = (width - (hook_bbox[2] - hook_bbox[0])) // 2
-        hook_y = box_y - 120
+        hook_font = load_font_safe(52, bold=True)
+        if hasattr(hook_font, 'getbbox'):
+            hook_bbox = hook_font.getbbox(hook.upper())
+            hook_width = hook_bbox[2] - hook_bbox[0]
+        else:
+            hook_width = hook_font.getsize(hook.upper())[0]
         
-        hook_opacity = 255 if not is_video else int(255 * min(1.0, time_offset / 1))
+        hook_x = box_x + (box_width - hook_width) // 2
+        hook_y = box_y - 90
         
-        # Hook shadow
-        draw.text((hook_x+3, hook_y+3), hook.upper(),
-                 font=hook_font, fill=(0, 0, 0, hook_opacity // 2))
+        hook_alpha = int(255 * min(1.0, t / 1.0)) if is_video else 255
         
-        # Hook text
-        draw.text((hook_x, hook_y), hook.upper(),
-                 font=hook_font, 
-                 fill=current_colors["accent"][:3] + (hook_opacity,))
+        draw.text((hook_x, hook_y), hook.upper(), 
+                 font=hook_font, fill=THEME["white"][:3] + (hook_alpha,))
     
-    # Draw reference (bottom)
-    ref_font = load_natural_font(40, bold=True)
-    ref_bbox = ref_font.getbbox(reference)
-    ref_x = box_x + box_width - (ref_bbox[2] - ref_bbox[0]) - 40
+    # 8. REFERENCE
+    ref_font = load_font_safe(38, bold=True)
+    reference = f"{book} {chapter}:{verse_num}"
+    
+    if hasattr(ref_font, 'getbbox'):
+        ref_bbox = ref_font.getbbox(reference)
+        ref_width = ref_bbox[2] - ref_bbox[0]
+    else:
+        ref_width = ref_font.getsize(reference)[0]
+    
+    ref_x = box_x + box_width - ref_width - 40
     ref_y = box_y + box_height + 40
     
-    ref_opacity = 255 if not is_video else int(255 * max(0, min(1.0, (time_offset - 4) / 1)))
+    ref_alpha = int(255 * max(0, min(1.0, (t - 4) / 1))) if is_video else 255
     
-    if ref_opacity > 0:
+    if ref_alpha > 0:
         # Reference background
-        draw.rectangle([ref_x-15, ref_y-10, 
-                       ref_x + (ref_bbox[2] - ref_bbox[0]) + 15, 
-                       ref_y + (ref_bbox[3] - ref_bbox[1]) + 10],
-                      fill=current_colors["accent"][:3] + (ref_opacity // 3,))
+        draw.rectangle([ref_x - 15, ref_y - 10, 
+                       ref_x + ref_width + 15, 
+                       ref_y + (ref_bbox[3] - ref_bbox[1]) + 10 if hasattr(ref_font, 'getbbox') else ref_y + 40],
+                      fill=THEME["forest"][:3] + (ref_alpha // 2,))
         
         # Reference text
         draw.text((ref_x, ref_y), reference,
                  font=ref_font,
-                 fill=current_colors["text"][:3] + (ref_opacity,))
-    
-    # Add "Still Mind Nature" watermark
-    watermark_font = load_natural_font(35)
-    draw.text((30, 30), "Still Mind Nature",
-             font=watermark_font,
-             fill=current_colors["accent"][:3] + (180,))
+                 fill=THEME["white"][:3] + (ref_alpha,))
     
     return img
 
 # ============================================================================
 # VIDEO GENERATION
 # ============================================================================
-def create_nature_video(width, height, theme_name, book, chapter, verse, hook):
-    """Create a video showing dawn progression."""
-    duration = 8  # seconds
+def create_meditation_video(w, h, book, chapter, verse, hook, duration=8):
+    """Create animated meditation video."""
     fps = 24
     
     def make_frame(t):
-        # Dawn progresses from 0 to 1 over the video duration
-        dawn_progress = min(1.0, t / duration)
-        
-        img = create_nature_scene(
-            width, height, theme_name, book, chapter, verse,
-            hook, dawn_progress, t, True
-        )
-        
+        img = create_master_frame(w, h, book, chapter, verse, hook, t, True, duration)
         return np.array(img.convert("RGB"))
     
     clip = VideoClip(make_frame, duration=duration)
@@ -578,47 +490,17 @@ def create_nature_video(width, height, theme_name, book, chapter, verse, hook):
 # ============================================================================
 # STREAMLIT UI
 # ============================================================================
-st.title("🌿 Still Mind Nature")
-st.markdown("### Create serene nature-themed scripture graphics")
+st.title("🌿 Still Mind Nature Studio")
+st.markdown("### Create serene nature-themed scripture meditations")
 
-# Custom CSS
-st.markdown("""
-<style>
-    .stButton > button {
-        background: linear-gradient(90deg, #4CAF50, #2E7D32);
-        color: white;
-        border: none;
-        padding: 0.75rem;
-        border-radius: 10px;
-        font-weight: bold;
-        transition: all 0.3s;
-    }
-    .stButton > button:hover {
-        background: linear-gradient(90deg, #45a049, #1B5E20);
-        transform: translateY(-2px);
-    }
-    .sidebar .sidebar-content {
-        background: linear-gradient(180deg, #1a2c1a, #0d1b0d);
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Sidebar
+# Sidebar controls
 with st.sidebar:
-    st.header("🎨 Nature Settings")
+    st.header("🌅 Nature Settings")
     
-    theme_option = st.selectbox("Theme", list(THEMES.keys()))
-    size_option = st.selectbox("Size Format", list(SIZES.keys()))
-    width, height = SIZES[size_option]
+    hook = st.text_input("Header Text", "MORNING PEACE")
     
-    st.header("🌅 Dawn Settings")
-    dawn_slider = st.slider("Dawn Progress", 0.0, 1.0, 0.0, 0.1,
-                           help="0.0 = Night, 1.0 = Full Sunrise")
-    
-    st.header("📖 Scripture")
-    bible_books = ["Psalm", "Isaiah", "Matthew", "John", "Romans", 
-                   "Ephesians", "Philippians", "Colossians", "James"]
-    book = st.selectbox("Book", bible_books)
+    st.header("📖 Scripture Selection")
+    book = st.selectbox("Book", ["Psalm", "Isaiah", "Matthew", "John", "Romans", "Philippians", "James"], index=0)
     
     col1, col2 = st.columns(2)
     with col1:
@@ -626,23 +508,29 @@ with st.sidebar:
     with col2:
         verse = st.number_input("Verse", 1, 176, 1)
     
-    hook = st.text_input("Header Text", "PEACE LIKE A RIVER")
+    st.header("🎬 Animation Controls")
+    time_scrubber = st.slider("Animation Time", 0.0, 8.0, 0.0, 0.1)
     
-    st.header("🌬️ Nature Effects")
-    wind_strength = st.slider("Wind Strength", 0.0, 1.0, 0.5, 0.1)
+    st.header("📐 Size Format")
+    size_option = st.selectbox("Choose Size", 
+                              ["TikTok (1080x1920)", "Instagram (1080x1080)", "Stories (1080x1350)"])
+    
+    if "1080x1080" in size_option:
+        W, H = 1080, 1080
+    elif "1080x1350" in size_option:
+        W, H = 1080, 1350
+    else:
+        W, H = 1080, 1920
 
-# Main content
+# Main content area
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    # Generate preview
+    # Preview section
     st.subheader("🌿 Live Preview")
     
-    with st.spinner("Painting nature scene..."):
-        preview_img = create_nature_scene(
-            width, height, theme_option, book, chapter, verse,
-            hook, dawn_slider, 0, False
-        )
+    with st.spinner("Creating nature scene..."):
+        preview_img = create_master_frame(W, H, book, chapter, verse, hook, time_scrubber, False, 8)
     
     st.image(preview_img, use_column_width=True)
     
@@ -657,105 +545,85 @@ with col1:
         st.download_button(
             label="📥 Download PNG",
             data=img_buffer.getvalue(),
-            file_name=f"nature_peace_{book}_{chapter}_{verse}.png",
+            file_name=f"still_mind_{book}_{chapter}_{verse}.png",
             mime="image/png",
             use_container_width=True
         )
     
     with col_btn2:
         # Generate video
-        if st.button("🎬 Sunrise Meditation (8s)", use_container_width=True):
-            with st.spinner("Watching the sunrise..."):
-                video_data = create_nature_video(
-                    width, height, theme_option,
-                    book, chapter, verse, hook
-                )
+        if st.button("🎬 Create Meditation Video (8s)", use_container_width=True):
+            with st.spinner("Animating river, birds, and growing trees..."):
+                video_data = create_meditation_video(W, H, book, chapter, verse, hook, 8)
                 
                 if video_data:
                     st.video(video_data)
                     
-                    # Video download
+                    # Video download button
                     st.download_button(
                         label="📥 Download MP4",
                         data=video_data,
-                        file_name=f"sunrise_meditation_{book}_{chapter}_{verse}.mp4",
+                        file_name=f"still_mind_meditation_{book}_{chapter}_{verse}.mp4",
                         mime="video/mp4",
                         use_container_width=True
                     )
 
 with col2:
-    st.subheader("🌳 Scene Info")
+    # Info panel
+    st.subheader("🌳 Scene Details")
     
-    # Theme preview
-    theme = THEMES[theme_option]
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.color_picker("Dawn Color", 
-                       value=f"#{theme['dawn']['sky'][0][0]:02x}{theme['dawn']['sky'][0][1]:02x}{theme['dawn']['sky'][0][2]:02x}",
-                       disabled=True)
-    with col_b:
-        st.color_picker("Sunrise Color", 
-                       value=f"#{theme['day']['sky'][1][0]:02x}{theme['day']['sky'][1][1]:02x}{theme['day']['sky'][1][2]:02x}",
-                       disabled=True)
+    st.write("**Active Elements:**")
+    st.success("✓ Flowing River with Reflections")
+    st.success("✓ Flying Birds with Water Reflections")
+    st.success("✓ Growing Fractal Trees")
+    st.success("✓ Sunrise/Sunset Progression")
+    st.success("✓ Frosted Glass Text Box")
+    st.success("✓ Typewriter Text Animation")
     
-    st.metric("Image Size", f"{width} × {height}")
-    st.metric("Dawn Progress", f"{dawn_slider:.0%}")
+    st.metric("Image Size", f"{W} × {H}")
+    st.metric("Animation Time", f"{time_scrubber:.1f}s")
     
     st.divider()
     
     # Verse info
-    verse_text, reference = fetch_bible_verse(book, chapter, verse)
+    verse_text = fetch_verse(book, chapter, verse)
     st.write("**Selected Verse:**")
     st.info(f"{book} {chapter}:{verse}")
     
-    st.write("**Text Preview:**")
-    st.caption(verse_text[:100] + "..." if len(verse_text) > 100 else verse_text)
-    
-    st.divider()
-    
-    # Nature effects info
-    st.subheader("🍃 Nature Effects")
-    
-    st.write("**Active Effects:**")
-    if dawn_slider > 0:
-        st.success(f"☀️ Sunrise: {dawn_slider:.0%}")
-    else:
-        st.info("🌙 Night Sky")
-    
-    st.write(f"🌬️ Wind Strength: {wind_strength:.1f}")
-    st.write("🌊 Ocean Waves: Animated")
-    st.write("🌳 Fractal Trees: Dynamic")
+    st.write("**Preview:**")
+    st.caption(verse_text[:120] + "..." if len(verse_text) > 120 else verse_text)
     
     st.divider()
     
     # Social media caption
     st.subheader("📱 Social Share")
     
-    nature_hashtags = {
-        "Forest Sunrise": "#Forest #Sunrise #Morning #NaturePeace",
-        "Ocean Twilight": "#Ocean #Twilight #Sea #CalmWaters",
-        "Mountain Mist": "#Mountains #Mist #Fog #Serenity"
-    }
-    
     caption = f"""{hook}
 
-"{verse_text[:120]}..."
+"{verse_text[:100]}..."
 
-🌿 {reference}
+🌿 {book} {chapter}:{verse}
 
-{nature_hashtags.get(theme_option, "#Nature #Peace #Stillness")}
-#StillMindNature #ScriptureInNature"""
+#StillMind #NatureMeditation #ScriptureInNature #Peace #Mindfulness #BibleVerse"""
 
-    st.text_area("Caption", caption, height=150)
+    st.text_area("Social Media Caption", caption, height=150)
     
     if st.button("📋 Copy Caption", use_container_width=True):
         st.code(caption)
-        st.success("Copied!")
+        st.success("Copied to clipboard!")
 
 # Footer
 st.divider()
 st.markdown("""
-<div style='text-align: center; color: #4CAF50;'>
-    <p>🌿 Still Mind Nature v2.0 • Finding peace in creation • Psalm 19:1</p>
+<div style='text-align: center; color: #2E7D32; font-size: 0.9rem;'>
+    <p>🌿 Still Mind Nature Studio • Psalm 23:2 • "He makes me lie down in green pastures"</p>
 </div>
 """, unsafe_allow_html=True)
+
+# Cleanup temporary files
+for file in os.listdir("."):
+    if file.startswith("temp_video_") and file.endswith(".mp4"):
+        try:
+            os.remove(file)
+        except:
+            pass
