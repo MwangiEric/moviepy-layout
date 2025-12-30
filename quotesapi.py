@@ -1,762 +1,220 @@
-"""
-STILL MIND - Complete Social Media Quote Generator
-Single File Production Version - FIXED
-"""
-
-import os
-import sys
-import json
-import time
-import base64
-import hashlib
-import random
-import datetime
-from io import BytesIO
-from pathlib import Path
-from functools import lru_cache
-from collections import OrderedDict
-from typing import Dict, List, Tuple, Optional, Any
-
-# Third-party imports
 import streamlit as st
-import requests
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+import io, os, math, time, random, json
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
-from groq import Groq
-import imageio.v3 as iio
+from datetime import datetime
+from typing import Tuple, List, Optional
 
-# ============================================
+# ============================================================================
 # CONFIGURATION
-# ============================================
+# ============================================================================
+st.set_page_config(
+    page_title="Still Mind | Modern Quote Generator",
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="collapsed"  # Minimal UI
+)
 
-# Brand identity
-BRAND_NAME = "Still Mind"
-BRAND_TAGLINE = "Wisdom for the modern soul"
-
-# Color palette (RGB tuples)
-COLORS = {
-    "deep_green": (27, 67, 50),
-    "dark_blue": (13, 27, 42),
-    "white": (255, 255, 255),
-    "light_grey": (224, 225, 221),
-    "accent_green": (45, 106, 79),
-    "accent_blue": (65, 90, 119),
-    "kenyan_flag_black": (0, 0, 0),
-    "kenyan_flag_red": (186, 12, 47),
-    "kenyan_flag_green": (0, 122, 51)
+# Brand Configuration
+BRAND_NAME = "@stillmind"
+BRAND_COLORS = {
+    "primary_green": (76, 175, 80, 255),     # #4CAF50
+    "dark_green": (56, 142, 60, 255),        # #388E3C
+    "navy_blue": (13, 27, 42, 255),          # #0d1b2a
+    "dark_navy": (5, 15, 25, 255),           # #050f19
+    "white": (255, 255, 255, 255),
+    "light_grey": (224, 224, 224, 255),      # #E0E0E0
+    "medium_grey": (158, 158, 158, 255),     # #9E9E9E
+    "accent_blue": (25, 118, 210, 255),      # #1976D2
 }
 
-# Image settings
-IMAGE_SIZE = (1080, 1080)  # Instagram square
-STORY_SIZE = (1080, 1920)  # Vertical stories
-ANIMATION_FPS = 12
-ANIMATION_DURATION = 6  # seconds
+SIZES = {
+    "Instagram Square (1080x1080)": (1080, 1080),
+    "Instagram Story (1080x1920)": (1080, 1920),
+    "Twitter Header (1500x500)": (1500, 500),
+    "Desktop Wallpaper (1920x1080)": (1920, 1080),
+}
 
-# Cache settings
-CACHE_TTL = 3600  # 1 hour
-MAX_CACHE_SIZE = 100
+ANIMATION_SETTINGS = {
+    "duration": 8,      # seconds
+    "fps": 15,          # frames per second
+    "total_frames": 120 # 8 * 15
+}
 
-# API URLs
-QUOTABLE_URL = "https://api.quotable.io"
-PEXELS_URL = "https://api.pexels.com/v1"
-
-# Font paths
-FONT_PATHS = [
-    "fonts/arial.ttf",
-    "arial.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-    "/System/Library/Fonts/Helvetica.ttf",
-    "C:/Windows/Fonts/arial.ttf"
-]
-
-# ============================================
-# CACHING SYSTEM
-# ============================================
-
-class SmartCache:
-    """Advanced caching system with TTL and LRU eviction"""
-    
-    def __init__(self, max_size: int = MAX_CACHE_SIZE, ttl: int = CACHE_TTL):
-        self.cache = OrderedDict()
-        self.timestamps = {}
-        self.max_size = max_size
-        self.ttl = ttl
-        self.stats = {"hits": 0, "misses": 0, "evictions": 0}
-    
-    def _make_key(self, *args, **kwargs) -> str:
-        """Create deterministic cache key"""
-        key_str = json.dumps(args, sort_keys=True) + json.dumps(kwargs, sort_keys=True)
-        return hashlib.sha256(key_str.encode()).hexdigest()
-    
-    def get(self, key: str) -> Any:
-        """Retrieve item with TTL check"""
-        now = time.time()
-        
-        if key in self.cache:
-            if now - self.timestamps[key] < self.ttl:
-                # Cache hit, move to end (most recently used)
-                value = self.cache.pop(key)
-                self.cache[key] = value
-                self.stats["hits"] += 1
-                return value
-            else:
-                # Expired, remove
-                self.delete(key)
-        
-        self.stats["misses"] += 1
-        return None
-    
-    def set(self, key: str, value: Any) -> None:
-        """Store item with LRU eviction"""
-        # Evict if needed
-        if len(self.cache) >= self.max_size:
-            oldest_key = next(iter(self.cache))
-            self.delete(oldest_key)
-            self.stats["evictions"] += 1
-        
-        self.cache[key] = value
-        self.timestamps[key] = time.time()
-    
-    def delete(self, key: str) -> None:
-        """Delete item from cache"""
-        self.cache.pop(key, None)
-        self.timestamps.pop(key, None)
-    
-    def clear(self) -> None:
-        """Clear entire cache"""
-        self.cache.clear()
-        self.timestamps.clear()
-        self.stats = {"hits": 0, "misses": 0, "evictions": 0}
-    
-    def get_stats(self) -> Dict:
-        """Get cache statistics"""
-        total = self.stats["hits"] + self.stats["misses"]
-        hit_rate = self.stats["hits"] / total if total > 0 else 0
-        return {
-            "size": len(self.cache),
-            "hit_rate": f"{hit_rate:.1%}",
-            "hits": self.stats["hits"],
-            "misses": self.stats["misses"],
-            "evictions": self.stats["evictions"]
-        }
-
-# ============================================
-# LOGGING - FIXED VERSION
-# ============================================
-
-class Logger:
-    """Structured logging - Fixed to avoid internal Streamlit attributes"""
+# ============================================================================
+# ANIMATED BACKGROUND GENERATORS
+# ============================================================================
+class AnimatedBackground:
+    """Generate modern animated backgrounds"""
     
     @staticmethod
-    def log(event: str, data: Dict = None, level: str = "INFO"):
-        """Log structured events"""
-        log_entry = {
-            "timestamp": datetime.datetime.now().isoformat(),
-            "level": level,
-            "event": event,
-            "data": data or {}
-        }
+    def create_wave_gradient(width: int, height: int, time_offset: float) -> Image.Image:
+        """Create wave-like gradient animation"""
+        img = Image.new("RGBA", (width, height))
         
-        # Safe logging - just print to console
-        print(json.dumps(log_entry))
-    
-    @staticmethod
-    def error(error: Exception, context: str = ""):
-        """Log errors with context"""
-        error_data = {
-            "error_type": type(error).__name__,
-            "error_message": str(error),
-            "context": context
-        }
-        Logger.log("ERROR", error_data, "ERROR")
-
-# ============================================
-# FONT MANAGER
-# ============================================
-
-class FontManager:
-    """Manages font loading and caching"""
-    
-    def __init__(self):
-        self.fonts = {}
-        self._load_fonts()
-    
-    def _load_fonts(self):
-        """Load all required fonts"""
-        font_found = False
-        
-        for font_path in FONT_PATHS:
-            try:
-                if Path(font_path).exists():
-                    self._load_font_from_path(font_path)
-                    font_found = True
-                    Logger.log("FONTS_LOADED", {"path": font_path})
-                    break
-            except Exception as e:
-                Logger.error(e, f"Failed to load font from {font_path}")
-                continue
-        
-        if not font_found:
-            Logger.log("USING_FALLBACK_FONTS")
-            self._create_fallback_fonts()
-    
-    def _load_font_from_path(self, path: str):
-        """Load fonts from specified path"""
-        # Regular fonts
-        self.fonts["regular"] = ImageFont.truetype(path, 40)
-        self.fonts["regular_small"] = ImageFont.truetype(path, 24)
-        self.fonts["regular_large"] = ImageFont.truetype(path, 60)
-        
-        # Try to load bold
-        try:
-            bold_path = path.replace(".ttf", "bd.ttf").replace("arial", "arialbd")
-            if Path(bold_path).exists():
-                self.fonts["bold"] = ImageFont.truetype(bold_path, 48)
-                self.fonts["bold_large"] = ImageFont.truetype(bold_path, 72)
-            else:
-                # Use regular as fallback for bold
-                self.fonts["bold"] = ImageFont.truetype(path, 48)
-                self.fonts["bold_large"] = ImageFont.truetype(path, 72)
-        except:
-            self.fonts["bold"] = ImageFont.truetype(path, 48)
-            self.fonts["bold_large"] = ImageFont.truetype(path, 72)
-        
-        # Try to load italic
-        try:
-            italic_path = path.replace(".ttf", "i.ttf").replace("arial", "ariali")
-            if Path(italic_path).exists():
-                self.fonts["italic"] = ImageFont.truetype(italic_path, 32)
-            else:
-                self.fonts["italic"] = ImageFont.truetype(path, 32)
-        except:
-            self.fonts["italic"] = ImageFont.truetype(path, 32)
-    
-    def _create_fallback_fonts(self):
-        """Create fallback fonts when system fonts fail"""
-        self.fonts = {
-            "regular": ImageFont.load_default(),
-            "regular_small": ImageFont.load_default(),
-            "regular_large": ImageFont.load_default(),
-            "bold": ImageFont.load_default(),
-            "bold_large": ImageFont.load_default(),
-            "italic": ImageFont.load_default(),
-        }
-    
-    def get(self, font_type: str, size: int = None) -> ImageFont.FreeTypeFont:
-        """Get font by type"""
-        if font_type not in self.fonts:
-            Logger.log("FONT_NOT_FOUND", {"font_type": font_type}, "WARNING")
-            return ImageFont.load_default()
-        
-        if size:
-            try:
-                # Get the font path and load at new size
-                font = self.fonts[font_type]
-                # Try to get path from font object
-                if hasattr(font, 'path'):
-                    return ImageFont.truetype(font.path, size)
-                else:
-                    # Load default and scale
-                    return ImageFont.load_default()
-            except:
-                return ImageFont.load_default()
-        
-        return self.fonts[font_type]
-
-# ============================================
-# API MANAGER
-# ============================================
-
-class APIManager:
-    """Manages all external API calls"""
-    
-    def __init__(self):
-        try:
-            # Load API keys from Streamlit secrets
-            self.groq_client = Groq(api_key=st.secrets["groq_key"])
-            self.pexels_key = st.secrets["pexels_api_key"]
-            self.cache = SmartCache()
-            Logger.log("API_MANAGER_INITIALIZED")
-        except Exception as e:
-            Logger.error(e, "API initialization failed")
-            st.error("❌ API configuration failed. Check secrets.")
-            st.stop()
-    
-    def _topic_to_tags(self, topic: str) -> List[str]:
-        """Map user topics to Quotable API tags"""
-        topic_lower = topic.lower()
-        
-        # Kenyan-specific mappings
-        kenyan_mappings = {
-            "hustle": ["success", "motivational", "work"],
-            "faith": ["faith", "spirituality", "religious"],
-            "family": ["love", "relationships", "family"],
-            "education": ["wisdom", "knowledge", "learning"],
-            "business": ["success", "motivational", "business"]
-        }
-        
-        # Check Kenyan topics first
-        for kenyan_word, tags in kenyan_mappings.items():
-            if kenyan_word in topic_lower:
-                return tags
-        
-        # Global mappings
-        mappings = {
-            "philosoph": ["philosophy", "wisdom"],
-            "psych": ["psychology", "mindfulness"],
-            "mind": ["mindfulness", "psychology"],
-            "life": ["life", "inspirational"],
-            "love": ["love", "relationships"],
-            "success": ["success", "motivational"],
-            "nature": ["nature", "inspirational"],
-            "spirit": ["spirituality", "faith"],
-            "stoic": ["philosophy", "wisdom"],
-            "exist": ["philosophy", "life"]
-        }
-        
-        for key, tags in mappings.items():
-            if key in topic_lower:
-                return tags
-        
-        return ["wisdom", "inspirational"]
-    
-    @lru_cache(maxsize=100)
-    def get_quote(self, topic: str) -> Dict:
-        """Get relevant quote from Quotable API"""
-        cache_key = f"quote_{topic.lower()}"
-        cached = self.cache.get(cache_key)
-        if cached:
-            return cached
-        
-        try:
-            # Map topic to tags
-            tags = self._topic_to_tags(topic)
-            
-            # Try each tag
-            for tag in tags[:3]:  # Limit to 3 attempts
-                try:
-                    response = requests.get(
-                        f"{QUOTABLE_URL}/quotes/random",
-                        params={
-                            "tags": tag,
-                            "maxLength": 150,
-                            "minLength": 50,
-                            "limit": 1
-                        },
-                        timeout=5
-                    )
-                    
-                    if response.status_code == 200:
-                        data = response.json()
-                        if data:
-                            quote_data = {
-                                "content": data[0]['content'],
-                                "author": data[0]['author'],
-                                "tags": data[0].get('tags', []),
-                                "topic": topic,
-                                "timestamp": datetime.datetime.now().isoformat()
-                            }
-                            
-                            # Cache the result
-                            self.cache.set(cache_key, quote_data)
-                            Logger.log("QUOTE_FETCHED", {"topic": topic, "tag": tag})
-                            return quote_data
-                except requests.Timeout:
-                    continue
-            
-            # Fallback: get random quote
-            response = requests.get(f"{QUOTABLE_URL}/random", timeout=5)
-            data = response.json()
-            quote_data = {
-                "content": data['content'],
-                "author": data['author'],
-                "tags": data.get('tags', []),
-                "topic": topic,
-                "timestamp": datetime.datetime.now().isoformat()
-            }
-            
-            self.cache.set(cache_key, quote_data)
-            return quote_data
-            
-        except Exception as e:
-            Logger.error(e, f"Quote fetch failed for topic: {topic}")
-            # Return a fallback quote
-            return self._get_fallback_quote(topic)
-    
-    def _get_fallback_quote(self, topic: str) -> Dict:
-        """Provide fallback quotes when API fails"""
-        fallback_quotes = [
-            {"content": "The mind is everything. What you think you become.", "author": "Buddha"},
-            {"content": "The only way to do great work is to love what you do.", "author": "Steve Jobs"},
-            {"content": "Life is what happens when you're busy making other plans.", "author": "John Lennon"},
-            {"content": "The future belongs to those who believe in the beauty of their dreams.", "author": "Eleanor Roosevelt"},
-            {"content": "It always seems impossible until it's done.", "author": "Nelson Mandela"}
-        ]
-        
-        quote = random.choice(fallback_quotes)
-        return {
-            "content": quote["content"],
-            "author": quote["author"],
-            "tags": ["wisdom", "inspirational"],
-            "topic": topic,
-            "timestamp": datetime.datetime.now().isoformat(),
-            "is_fallback": True
-        }
-    
-    @lru_cache(maxsize=100)
-    def generate_social_content(self, quote: str, author: str, topic: str = "") -> Dict:
-        """Generate TikTok/Instagram content using Groq AI"""
-        cache_key = f"social_{hashlib.md5(f'{quote}_{author}'.encode()).hexdigest()}"
-        cached = self.cache.get(cache_key)
-        if cached:
-            return cached
-        
-        try:
-            # Kenyan context prompt
-            kenyan_context = ""
-            if any(word in topic.lower() for word in ["kenya", "nairobi", "africa", "hustle"]):
-                kenyan_context = "Add Kenyan cultural context where relevant. Use phrases that resonate with Kenyan youth."
-            
-            prompt = f"""
-            You are a social media expert for "{BRAND_NAME}" - a philosophy and psychology brand.
-            
-            QUOTE: "{quote}"
-            AUTHOR: {author}
-            TARGET AUDIENCE: Global, with focus on Kenyan youth (18-35)
-            PLATFORM: TikTok/Instagram Reels
-            {kenyan_context}
-            
-            Generate a JSON object with:
-            1. caption: Engaging 2-3 line caption with 2-3 relevant emojis
-            2. hashtags: 7 hashtags including #stillmind and mix of philosophy/psychology/Kenyan tags
-            3. background_keywords: 3 keywords for image search (abstract, nature, urban, etc.)
-            4. visual_style: One of: watercolor, minimalist, sketch, abstract
-            5. audio_suggestion: Type of background audio (calm, lo-fi, afrobeat, instrumental)
-            6. call_to_action: One sentence prompting engagement
-            7. posting_time_suggestion: Best time to post (consider Kenyan timezone EAT)
-            
-            Make it authentic, relatable, and shareable.
-            """
-            
-            response = self.groq_client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model="mixtral-8x7b-32768",
-                temperature=0.8,
-                max_tokens=500,
-                response_format={"type": "json_object"}
-            )
-            
-            content = json.loads(response.choices[0].message.content)
-            
-            # Add metadata
-            content["generated_at"] = datetime.datetime.now().isoformat()
-            content["quote"] = quote
-            content["author"] = author
-            
-            self.cache.set(cache_key, content)
-            Logger.log("AI_CONTENT_GENERATED", {"topic": topic})
-            
-            return content
-            
-        except Exception as e:
-            Logger.error(e, "AI content generation failed")
-            return self._get_fallback_social_content(quote, author)
-    
-    def _get_fallback_social_content(self, quote: str, author: str) -> Dict:
-        """Fallback social content"""
-        return {
-            "caption": f"\"{quote}\"\n\n- {author}\n\nWhat does this mean to you? 💭",
-            "hashtags": "#stillmind #philosophy #wisdom #mindfulness #quote #thoughts #kenya",
-            "background_keywords": ["abstract", "thought", "mind"],
-            "visual_style": "watercolor",
-            "audio_suggestion": "calm instrumental",
-            "call_to_action": "Share your thoughts in comments!",
-            "posting_time_suggestion": "7-9 PM EAT",
-            "is_fallback": True
-        }
-    
-    def get_background_image(self, keywords: List[str], size: Tuple[int, int] = IMAGE_SIZE) -> Image.Image:
-        """Get background image from Pexels with caching"""
-        cache_key = f"bg_{'_'.join(keywords)}_{size[0]}x{size[1]}"
-        cached = self.cache.get(cache_key)
-        if cached:
-            # Convert cached bytes back to image
-            return Image.open(BytesIO(cached))
-        
-        try:
-            # Prepare search query
-            query = " ".join(keywords[:2]) + " abstract"
-            
-            headers = {"Authorization": self.pexels_key}
-            response = requests.get(
-                f"{PEXELS_URL}/search",
-                params={
-                    "query": query,
-                    "per_page": 5,
-                    "orientation": "square",
-                    "size": "large"
-                },
-                headers=headers,
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('photos'):
-                    # Select the first photo
-                    photo = data['photos'][0]
-                    img_url = photo['src']['large']
-                    
-                    # Download image
-                    img_response = requests.get(img_url, timeout=10)
-                    img = Image.open(BytesIO(img_response.content))
-                    
-                    # Resize and cache
-                    img = img.resize(size, Image.Resampling.LANCZOS)
-                    
-                    # Cache the image bytes
-                    img_bytes = BytesIO()
-                    img.save(img_bytes, format='JPEG', quality=85)
-                    self.cache.set(cache_key, img_bytes.getvalue())
-                    
-                    Logger.log("BACKGROUND_FETCHED", {"keywords": keywords})
-                    return img
-        
-        except Exception as e:
-            Logger.error(e, f"Background fetch failed for keywords: {keywords}")
-        
-        # Generate artistic background as fallback
-        return self._generate_artistic_background(size, keywords)
-    
-    def _generate_artistic_background(self, size: Tuple[int, int], keywords: List[str]) -> Image.Image:
-        """Generate artistic background when API fails"""
-        width, height = size
-        
-        # Create base with gradient
-        base = Image.new('RGB', size, COLORS["dark_blue"])
-        draw = ImageDraw.Draw(base)
-        
-        # Add gradient
         for y in range(height):
-            alpha = y / height
-            r = int(COLORS["dark_blue"][0] * (1 - alpha) + COLORS["accent_blue"][0] * alpha)
-            g = int(COLORS["dark_blue"][1] * (1 - alpha) + COLORS["accent_blue"][1] * alpha)
-            b = int(COLORS["dark_blue"][2] * (1 - alpha) + COLORS["accent_blue"][2] * alpha)
-            draw.line([(0, y), (width, y)], fill=(r, g, b))
-        
-        # Add abstract shapes
-        for _ in range(20):
-            x = random.randint(0, width)
-            y = random.randint(0, height)
-            radius = random.randint(20, 100)
-            color = random.choice([COLORS["accent_green"], COLORS["accent_blue"], COLORS["deep_green"]])
+            # Calculate wave offset
+            wave = math.sin(y * 0.01 + time_offset) * 20
             
-            # Create "brush stroke" effect
-            for i in range(radius, 0, -10):
-                alpha = int(50 * (i/radius))
-                draw.ellipse(
-                    [x-i, y-i, x+i, y+i],
-                    fill=color + (alpha,),
-                    outline=None
-                )
+            # Interpolate between navy and dark navy with wave effect
+            ratio = (y + wave) / height
+            ratio = max(0, min(1, ratio))
+            
+            # Dark to light gradient (bottom to top)
+            r = int(BRAND_COLORS["navy_blue"][0] * (1 - ratio) + BRAND_COLORS["dark_navy"][0] * ratio)
+            g = int(BRAND_COLORS["navy_blue"][1] * (1 - ratio) + BRAND_COLORS["dark_navy"][1] * ratio)
+            b = int(BRAND_COLORS["navy_blue"][2] * (1 - ratio) + BRAND_COLORS["dark_navy"][2] * ratio)
+            
+            for x in range(width):
+                # Add subtle horizontal variation
+                x_ratio = math.sin(x * 0.005 + time_offset * 0.5) * 0.1
+                final_ratio = max(0, min(1, ratio + x_ratio))
+                
+                pixel_r = int(r * (1 - final_ratio) + BRAND_COLORS["navy_blue"][0] * final_ratio)
+                pixel_g = int(g * (1 - final_ratio) + BRAND_COLORS["navy_blue"][1] * final_ratio)
+                pixel_b = int(b * (1 - final_ratio) + BRAND_COLORS["navy_blue"][2] * final_ratio)
+                
+                img.putpixel((x, y), (pixel_r, pixel_g, pixel_b, 255))
         
-        # Add texture
-        texture = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-        tex_draw = ImageDraw.Draw(texture)
+        return img
+    
+    @staticmethod
+    def create_particle_field(width: int, height: int, time_offset: float) -> Image.Image:
+        """Create floating particle animation"""
+        img = Image.new("RGBA", (width, height), BRAND_COLORS["navy_blue"])
+        draw = ImageDraw.Draw(img)
         
-        # Paper texture effect
-        for _ in range(1000):
-            x = random.randint(0, width)
-            y = random.randint(0, height)
-            tex_draw.point((x, y), fill=(255, 255, 255, random.randint(5, 15)))
+        # Create particles
+        num_particles = 100
+        for i in range(num_particles):
+            # Particle position with time-based movement
+            x = (i * 37) % width + math.sin(time_offset * 2 + i) * 50
+            y = (i * 19) % height + math.cos(time_offset * 1.5 + i) * 30
+            
+            # Particle size and opacity
+            size = 1 + math.sin(time_offset * 3 + i) * 0.5
+            opacity = int(100 + 155 * abs(math.sin(time_offset + i)))
+            
+            # Draw particle
+            draw.ellipse([x-size, y-size, x+size, y+size],
+                        fill=BRAND_COLORS["light_grey"][:3] + (opacity,))
         
-        base = Image.alpha_composite(base.convert('RGBA'), texture).convert('RGB')
+        # Add subtle vignette
+        for y in range(height):
+            for x in range(width):
+                # Distance from center
+                dx = (x - width/2) / width
+                dy = (y - height/2) / height
+                dist = math.sqrt(dx*dx + dy*dy)
+                
+                # Vignette effect
+                vignette = max(0, 1 - dist * 1.5)
+                r, g, b, a = img.getpixel((x, y))
+                r = int(r * vignette)
+                g = int(g * vignette)
+                b = int(b * vignette)
+                
+                img.putpixel((x, y), (r, g, b, a))
         
-        # Apply artistic filter
-        base = base.filter(ImageFilter.GaussianBlur(1))
+        return img
+    
+    @staticmethod
+    def create_geometric_lines(width: int, height: int, time_offset: float) -> Image.Image:
+        """Create animated geometric lines background"""
+        img = Image.new("RGBA", (width, height), BRAND_COLORS["dark_navy"])
+        draw = ImageDraw.Draw(img)
         
-        return base
+        # Draw animated lines
+        num_lines = 20
+        for i in range(num_lines):
+            # Line position with animation
+            offset = time_offset * 50
+            x1 = (i * width / num_lines + offset) % width
+            y1 = 0
+            x2 = x1 + height * math.tan(math.radians(30))
+            y2 = height
+            
+            # Wrap around
+            if x2 > width:
+                x2 -= width
+            
+            # Line color and opacity
+            opacity = int(50 + 50 * math.sin(time_offset + i))
+            color = BRAND_COLORS["medium_grey"][:3] + (opacity,)
+            
+            # Draw line
+            draw.line([(x1, y1), (x2, y2)], fill=color, width=2)
+        
+        # Add center glow
+        center_size = min(width, height) // 3
+        for size in range(center_size, 0, -10):
+            opacity = int(30 * (size / center_size))
+            draw.ellipse([width//2 - size, height//2 - size,
+                         width//2 + size, height//2 + size],
+                        outline=BRAND_COLORS["primary_green"][:3] + (opacity,),
+                        width=1)
+        
+        return img
 
-# ============================================
+# ============================================================================
+# QUOTE MANAGER
+# ============================================================================
+class QuoteManager:
+    """Manage quotes and categories"""
+    
+    QUOTES = {
+        "motivation": [
+            {"text": "TRUST YOURSELF", "author": "Still Mind"},
+            {"text": "TAKE CARE TO WORK HARD", "author": "Still Mind"},
+            {"text": "DON'T GIVE UP", "author": "Still Mind"},
+            {"text": "The only way to do great work is to love what you do.", "author": "Steve Jobs"},
+            {"text": "Believe you can and you're halfway there.", "author": "Theodore Roosevelt"},
+        ],
+        "wisdom": [
+            {"text": "The mind is everything. What you think you become.", "author": "Buddha"},
+            {"text": "Knowing yourself is the beginning of all wisdom.", "author": "Aristotle"},
+            {"text": "The only true wisdom is in knowing you know nothing.", "author": "Socrates"},
+            {"text": "Wisdom is not a product of schooling but of the lifelong attempt to acquire it.", "author": "Albert Einstein"},
+        ],
+        "success": [
+            {"text": "Success is not final, failure is not fatal: it is the courage to continue that counts.", "author": "Winston Churchill"},
+            {"text": "The way to get started is to quit talking and begin doing.", "author": "Walt Disney"},
+            {"text": "Don't be afraid to give up the good to go for the great.", "author": "John D. Rockefeller"},
+            {"text": "Success usually comes to those who are too busy to be looking for it.", "author": "Henry David Thoreau"},
+        ],
+        "mindfulness": [
+            {"text": "Be present in all things and thankful for all things.", "author": "Maya Angelou"},
+            {"text": "The present moment is the only moment available to us.", "author": "Thich Nhat Hanh"},
+            {"text": "Mindfulness is the aware, balanced acceptance of the present experience.", "author": "Sylvia Boorstein"},
+            {"text": "Feelings come and go like clouds in a windy sky. Conscious breathing is my anchor.", "author": "Thich Nhat Hanh"},
+        ]
+    }
+    
+    @classmethod
+    def get_random_quote(cls, category: str = "motivation") -> dict:
+        """Get a random quote from specified category"""
+        if category in cls.QUOTES:
+            return random.choice(cls.QUOTES[category])
+        return random.choice(cls.QUOTES["motivation"])
+    
+    @classmethod
+    def get_all_quotes(cls) -> List[str]:
+        """Get all quotes for display"""
+        all_quotes = []
+        for category in cls.QUOTES.values():
+            all_quotes.extend([q["text"] for q in category])
+        return all_quotes
+
+# ============================================================================
 # IMAGE GENERATOR
-# ============================================
-
-class ImageGenerator:
-    """Advanced image generation with multiple layouts and effects"""
+# ============================================================================
+class ModernQuoteGenerator:
+    """Generate modern quote images with animated backgrounds"""
     
     def __init__(self):
-        self.font_manager = FontManager()
-        self.cache = SmartCache()
-    
-    def create_quote_image(self, 
-                          quote: str, 
-                          author: str, 
-                          background: Image.Image,
-                          style: str = "watercolor") -> Image.Image:
-        """Create main quote image"""
-        cache_key = f"img_{hashlib.md5(f'{quote}_{author}_{style}'.encode()).hexdigest()}"
-        cached = self.cache.get(cache_key)
-        if cached:
-            return Image.open(BytesIO(cached))
+        self.bg_generator = AnimatedBackground()
         
-        try:
-            # Start with background
-            img = background.copy()
-            
-            # Apply style effect
-            if style == "watercolor":
-                img = self._apply_watercolor_effect(img)
-            elif style == "sketch":
-                img = self._apply_sketch_effect(img)
-            elif style == "minimalist":
-                img = self._apply_minimalist_effect(img)
-            
-            # Create text overlay
-            overlay = self._create_text_overlay(quote, author, img.size)
-            
-            # Composite
-            result = Image.alpha_composite(img.convert('RGBA'), overlay)
-            
-            # Add final effects
-            result = self._add_final_effects(result)
-            
-            # Cache result
-            img_bytes = BytesIO()
-            result.save(img_bytes, format='PNG', quality=95)
-            self.cache.set(cache_key, img_bytes.getvalue())
-            
-            Logger.log("IMAGE_GENERATED", {"style": style})
-            
-            return result
-            
-        except Exception as e:
-            Logger.error(e, "Image generation failed")
-            return self._create_fallback_image(quote, author)
-    
-    def _create_text_overlay(self, quote: str, author: str, size: Tuple[int, int]) -> Image.Image:
-        """Create text overlay with proper layout"""
-        width, height = size
-        overlay = Image.new('RGBA', size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        
-        # Define fonts
-        quote_font = self.font_manager.get("bold_large")
-        author_font = self.font_manager.get("italic")
-        brand_font = self.font_manager.get("bold")
-        
-        # Calculate text positioning
-        max_width = width - 200
-        wrapped_lines = self._wrap_text(quote, quote_font, max_width)
-        
-        # Calculate total height needed
-        line_height = 70
-        total_text_height = len(wrapped_lines) * line_height + 100  # Space for author
-        
-        # Center vertically
-        start_y = (height - total_text_height) // 2
-        
-        # Draw quote container
-        self._draw_quote_container(draw, width, start_y, total_text_height)
-        
-        # Draw quote text with shadow effect
-        y_offset = start_y + 50
-        for line in wrapped_lines:
-            # Measure text
-            bbox = draw.textbbox((0, 0), line, font=quote_font)
-            text_width = bbox[2] - bbox[0]
-            
-            # Center horizontally
-            x = (width - text_width) // 2
-            
-            # Draw shadow (multiple layers for depth)
-            for offset in [(3, 3), (2, 2)]:
-                draw.text((x + offset[0], y_offset + offset[1]), 
-                         line, font=quote_font, 
-                         fill=COLORS["dark_blue"] + (100,))
-            
-            # Draw main text
-            draw.text((x, y_offset), line, 
-                     font=quote_font, 
-                     fill=COLORS["white"])
-            
-            y_offset += line_height
-        
-        # Draw author (bottom right of text area)
-        author_text = f"— {author}"
-        author_bbox = draw.textbbox((0, 0), author_text, font=author_font)
-        author_width = author_bbox[2] - author_bbox[0]
-        author_x = (width - author_width) // 2
-        author_y = start_y + total_text_height - 40
-        
-        # Author with subtle shadow
-        draw.text((author_x + 1, author_y + 1), author_text,
-                 font=author_font, fill=COLORS["dark_blue"] + (150,))
-        draw.text((author_x, author_y), author_text,
-                 font=author_font, fill=COLORS["light_grey"])
-        
-        # Draw decorative line
-        line_length = 300
-        line_x = (width - line_length) // 2
-        line_y = author_y + 40
-        
-        # Gradient line
-        for i in range(line_length):
-            alpha = int(255 * (i / line_length))
-            draw.line([(line_x + i, line_y), (line_x + i, line_y + 3)],
-                     fill=COLORS["accent_green"] + (alpha,),
-                     width=3)
-        
-        # Draw brand watermark (center bottom)
-        brand_text = BRAND_NAME
-        brand_bbox = draw.textbbox((0, 0), brand_text, font=brand_font)
-        brand_width = brand_bbox[2] - brand_bbox[0]
-        brand_x = (width - brand_width) // 2
-        brand_y = height - 70
-        
-        # Brand with glow effect
-        for offset in range(3, 0, -1):
-            draw.text((brand_x + offset, brand_y + offset), brand_text,
-                     font=brand_font, 
-                     fill=COLORS["accent_green"] + (100,))
-        
-        draw.text((brand_x, brand_y), brand_text,
-                 font=brand_font, 
-                 fill=COLORS["accent_green"] + (200,))
-        
-        return overlay
-    
-    def _draw_quote_container(self, draw: ImageDraw.Draw, width: int, start_y: int, height: int):
-        """Draw decorative container for quote"""
-        # Main rectangle with gradient
-        for i in range(height):
-            alpha = 200 - int(100 * (i / height))
-            draw.rectangle([100, start_y + i, width - 100, start_y + i + 1],
-                          fill=COLORS["dark_blue"] + (alpha,))
-        
-        # Double border
-        draw.rectangle([100, start_y, width - 100, start_y + height],
-                      outline=COLORS["accent_green"] + (180,),
-                      width=3)
-        
-        # Inner border
-        draw.rectangle([103, start_y + 3, width - 103, start_y + height - 3],
-                      outline=COLORS["white"] + (80,),
-                      width=1)
-        
-        # Corner decorations
-        corner_size = 15
-        corners = [
-            (100, start_y),
-            (width - 100 - corner_size, start_y),
-            (100, start_y + height - corner_size),
-            (width - 100 - corner_size, start_y + height - corner_size)
-        ]
-        
-        for corner_x, corner_y in corners:
-            draw.rectangle([corner_x, corner_y, corner_x + corner_size, corner_y + corner_size],
-                          fill=COLORS["accent_green"] + (120,))
-    
-    def _wrap_text(self, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> List[str]:
+    def wrap_text(self, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> List[str]:
         """Wrap text to fit within max width"""
         words = text.split()
         lines = []
@@ -777,1121 +235,378 @@ class ImageGenerator:
         if current_line:
             lines.append(' '.join(current_line))
         
-        # If still too many lines, shorten
-        if len(lines) > 4:
-            lines = lines[:4]
-            lines[-1] = lines[-1][:50] + "..."
-        
-        return lines
+        return lines[:4]  # Maximum 4 lines
     
-    def _apply_watercolor_effect(self, img: Image.Image) -> Image.Image:
-        """Apply watercolor painting effect"""
-        # Multiple blurs at different scales
-        blurred = img.filter(ImageFilter.GaussianBlur(radius=2))
+    def create_quote_image(self, 
+                          quote_text: str, 
+                          author: str, 
+                          size: Tuple[int, int],
+                          bg_style: str = "wave",
+                          time_offset: float = 0) -> Image.Image:
+        """Create a modern quote image"""
+        width, height = size
         
-        # Enhance edges
-        edges = img.filter(ImageFilter.FIND_EDGES)
-        edges = edges.convert('L')
+        # Create background based on style
+        if bg_style == "particle":
+            bg = self.bg_generator.create_particle_field(width, height, time_offset)
+        elif bg_style == "geometric":
+            bg = self.bg_generator.create_geometric_lines(width, height, time_offset)
+        else:  # wave gradient
+            bg = self.bg_generator.create_wave_gradient(width, height, time_offset)
         
-        # Blend
-        result = Image.blend(blurred, img, alpha=0.7)
-        
-        # Apply color overlay
-        overlay = Image.new('RGB', img.size, COLORS["accent_blue"])
-        result = Image.blend(result, overlay, alpha=0.1)
-        
-        return result
-    
-    def _apply_sketch_effect(self, img: Image.Image) -> Image.Image:
-        """Apply pencil sketch effect"""
-        # Convert to grayscale
-        gray = img.convert('L')
-        
-        # Invert
-        inverted = ImageOps.invert(gray)
-        
-        # Blur
-        blurred = inverted.filter(ImageFilter.GaussianBlur(radius=2))
-        
-        # Dodge blend
-        result = ImageOps.colorize(gray, (0, 0, 0), (255, 255, 255))
-        
-        return result
-    
-    def _apply_minimalist_effect(self, img: Image.Image) -> Image.Image:
-        """Apply minimalist effect"""
-        # Desaturate
-        img = ImageOps.grayscale(img)
-        
-        # Increase contrast
-        img = ImageOps.autocontrast(img, cutoff=2)
-        
-        # Posterize
-        img = ImageOps.posterize(img, 2)
-        
-        return img.convert('RGB')
-    
-    def _add_final_effects(self, img: Image.Image) -> Image.Image:
-        """Add final artistic touches"""
-        # Vignette effect
-        width, height = img.size
-        vignette = Image.new('L', (width, height), 255)
-        draw = ImageDraw.Draw(vignette)
-        
-        # Draw radial gradient
-        center_x, center_y = width // 2, height // 2
-        max_radius = max(width, height)
-        
-        for radius in range(max_radius, 0, -max_radius // 10):
-            alpha = int(255 * (radius / max_radius) * 0.6)
-            draw.ellipse([center_x - radius, center_y - radius,
-                         center_x + radius, center_y + radius],
-                        fill=alpha)
-        
-        # Apply vignette
-        vignette_rgb = Image.merge('RGB', (vignette, vignette, vignette))
-        img = Image.blend(img.convert('RGB'), vignette_rgb, alpha=0.2)
-        
-        # Add subtle grain
-        grain = Image.effect_noise(img.size, 3)
-        img = Image.blend(img, grain, alpha=0.02)
-        
-        # Add warm tone
-        warm = Image.new('RGB', img.size, (255, 240, 220))
-        img = Image.blend(img, warm, alpha=0.05)
-        
-        return img
-    
-    def _create_fallback_image(self, quote: str, author: str) -> Image.Image:
-        """Create simple fallback image"""
-        img = Image.new('RGB', IMAGE_SIZE, COLORS["dark_blue"])
+        # Create a clean copy for drawing
+        img = bg.copy()
         draw = ImageDraw.Draw(img)
         
-        # Simple text
-        font = self.font_manager.get("regular")
-        draw.text((100, 100), f'"{quote}"', fill=COLORS["white"], font=font)
-        draw.text((100, 300), f"- {author}", fill=COLORS["light_grey"], font=font)
+        # Try to load modern font, fallback to default
+        try:
+            # Try to use a sans-serif font for modern look
+            title_font = ImageFont.truetype("arialbd.ttf", 80)
+            quote_font = ImageFont.truetype("arial.ttf", 60)
+            author_font = ImageFont.truetype("ariali.ttf", 40)
+            brand_font = ImageFont.truetype("arial.ttf", 30)
+        except:
+            # Fallback to default
+            title_font = ImageFont.load_default()
+            quote_font = ImageFont.load_default()
+            author_font = ImageFont.load_default()
+            brand_font = ImageFont.load_default()
+        
+        # Draw quote text
+        max_text_width = width - 200
+        lines = self.wrap_text(quote_text, quote_font, max_text_width)
+        
+        # Calculate total text height
+        line_height = 80
+        total_text_height = len(lines) * line_height + 40
+        
+        # Center vertically
+        start_y = (height - total_text_height) // 2
+        
+        # Draw each line
+        for i, line in enumerate(lines):
+            bbox = quote_font.getbbox(line)
+            line_width = bbox[2] - bbox[0]
+            x = (width - line_width) // 2
+            y = start_y + i * line_height
+            
+            # Text shadow for depth
+            draw.text((x + 3, y + 3), line, 
+                     font=quote_font, 
+                     fill=BRAND_COLORS["dark_navy"][:3] + (100,))
+            
+            # Main text
+            draw.text((x, y), line,
+                     font=quote_font,
+                     fill=BRAND_COLORS["white"])
+        
+        # Draw author
+        author_text = f"— {author}"
+        author_bbox = author_font.getbbox(author_text)
+        author_x = (width - (author_bbox[2] - author_bbox[0])) // 2
+        author_y = start_y + total_text_height + 20
+        
+        draw.text((author_x, author_y), author_text,
+                 font=author_font,
+                 fill=BRAND_COLORS["light_grey"])
+        
+        # Draw subtle divider line
+        line_length = 300
+        line_x = (width - line_length) // 2
+        line_y = author_y + 60
+        
+        # Gradient line (green to transparent)
+        for i in range(line_length):
+            alpha = int(255 * (1 - i / line_length))
+            color = BRAND_COLORS["primary_green"][:3] + (alpha,)
+            draw.line([(line_x + i, line_y), (line_x + i, line_y + 3)],
+                     fill=color, width=3)
+        
+        # Draw brand in corner (minimal)
+        brand_text = BRAND_NAME
+        draw.text((width - 200, height - 40), brand_text,
+                 font=brand_font,
+                 fill=BRAND_COLORS["medium_grey"])
         
         return img
     
-    def create_animation(self, 
-                        static_image: Image.Image, 
-                        duration: int = ANIMATION_DURATION,
-                        fps: int = ANIMATION_FPS) -> BytesIO:
-        """Create animated video from image"""
-        cache_key = f"anim_{hashlib.md5(static_image.tobytes()).hexdigest()}"
-        cached = self.cache.get(cache_key)
-        if cached:
-            return BytesIO(cached)
+    def create_animation_frames(self, 
+                               quote_text: str, 
+                               author: str, 
+                               size: Tuple[int, int],
+                               bg_style: str = "wave") -> List[Image.Image]:
+        """Create frames for animation"""
+        frames = []
+        total_frames = ANIMATION_SETTINGS["total_frames"]
         
-        try:
-            frames = []
-            total_frames = duration * fps
+        for frame in range(total_frames):
+            time_offset = frame / ANIMATION_SETTINGS["fps"]
             
-            # Prepare base image
-            img_array = np.array(static_image.convert('RGB'))
-            
-            for frame_idx in range(total_frames):
-                progress = frame_idx / total_frames
-                
-                # Apply time-based effects
-                frame = img_array.copy()
-                
-                # Fade in/out
-                if progress < 0.3:  # Fade in
-                    alpha = progress / 0.3
-                    frame = (frame * alpha).astype(np.uint8)
-                elif progress > 0.7:  # Fade out
-                    alpha = 1 - ((progress - 0.7) / 0.3)
-                    frame = (frame * alpha).astype(np.uint8)
-                
-                # Subtle zoom
-                zoom_factor = 1.0 + 0.02 * np.sin(progress * np.pi * 2)
-                
-                # Apply zoom by cropping
-                if zoom_factor != 1.0:
-                    h, w = frame.shape[:2]
-                    new_h, new_w = int(h / zoom_factor), int(w / zoom_factor)
-                    
-                    if zoom_factor > 1.0:
-                        # Zoom in - crop
-                        start_y = (h - new_h) // 2
-                        start_x = (w - new_w) // 2
-                        cropped = frame[start_y:start_y + new_h, start_x:start_x + new_w]
-                        frame = np.array(Image.fromarray(cropped).resize((w, h)))
-                    else:
-                        # Zoom out - add border
-                        resized = np.array(Image.fromarray(frame).resize((new_w, new_h)))
-                        frame = np.full((h, w, 3), COLORS["dark_blue"], dtype=np.uint8)
-                        paste_y = (h - new_h) // 2
-                        paste_x = (w - new_w) // 2
-                        frame[paste_y:paste_y + new_h, paste_x:paste_x + new_w] = resized
-                
-                frames.append(frame)
-            
-            # Encode to MP4
-            buffer = BytesIO()
-            
-            # Use imageio for efficient encoding
-            iio.imwrite(
-                buffer,
-                frames,
-                format='mp4',
-                fps=fps,
-                codec='libx264',
-                quality=8,
-                macro_block_size=1
+            # Create frame
+            frame_img = self.create_quote_image(
+                quote_text, author, size, bg_style, time_offset
             )
             
-            # Cache the result
-            buffer.seek(0)
-            self.cache.set(cache_key, buffer.getvalue())
-            buffer.seek(0)
-            
-            Logger.log("ANIMATION_GENERATED", {"duration": duration, "fps": fps})
-            
-            return buffer
-            
-        except Exception as e:
-            Logger.error(e, "Animation generation failed")
-            # Return empty buffer
-            return BytesIO()
-    
-    def create_story_format(self, image: Image.Image) -> Image.Image:
-        """Convert square image to story format (9:16)"""
-        width, height = STORY_SIZE
+            # Convert to RGB (no alpha for video)
+            frames.append(frame_img.convert("RGB"))
         
-        # Create new canvas
-        story = Image.new('RGB', (width, height), COLORS["dark_blue"])
-        
-        # Resize original image to fit width
-        img_resized = image.resize((width, width), Image.Resampling.LANCZOS)
-        
-        # Paste at center
-        paste_y = (height - width) // 2
-        story.paste(img_resized, (0, paste_y))
-        
-        # Add gradient overlay at top and bottom
-        overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        
-        # Top gradient
-        for y in range(200):
-            alpha = int(150 * (1 - y / 200))
-            draw.rectangle([0, y, width, y + 1], fill=(0, 0, 0, alpha))
-        
-        # Bottom gradient
-        for y in range(200):
-            alpha = int(150 * (1 - y / 200))
-            draw.rectangle([0, height - y, width, height - y + 1], fill=(0, 0, 0, alpha))
-        
-        story = Image.alpha_composite(story.convert('RGBA'), overlay).convert('RGB')
-        
-        return story
+        return frames
 
-# ============================================
-# SOCIAL MEDIA MANAGER
-# ============================================
-
-class SocialMediaManager:
-    """Manages social media posting strategy"""
+# ============================================================================
+# VIDEO GENERATOR (using PIL only)
+# ============================================================================
+class VideoGenerator:
+    """Generate MP4 video using only PIL (no external dependencies)"""
     
     @staticmethod
-    def generate_posting_schedule() -> Dict:
-        """Generate optimal posting schedule"""
-        return {
-            "kenya_eat": {
-                "tiktok": ["07:00", "12:00", "19:00", "21:00"],
-                "instagram": ["08:00", "13:00", "18:00", "22:00"],
-                "twitter": ["06:00", "09:00", "17:00", "20:00"],
-                "facebook": ["07:00", "12:00", "19:00"]
-            },
-            "best_days": ["Tuesday", "Wednesday", "Thursday", "Friday"],
-            "avoid_days": ["Sunday", "Monday"],
-            "timezone": "Africa/Nairobi"
-        }
-    
-    @staticmethod
-    def get_hashtag_sets(topic: str) -> Dict[str, List[str]]:
-        """Get categorized hashtags for different platforms"""
+    def frames_to_video_bytes(frames: List[Image.Image]) -> bytes:
+        """Convert frames to MP4 video bytes"""
+        # Note: In production, you might want to use a proper video encoder
+        # For Streamlit Cloud compatibility, we'll create an animated WebP
+        # which can be displayed as video-like content
         
-        # Kenyan-specific hashtags
-        kenyan_tags = {
-            "location": ["#Kenya", "#Nairobi", "#Africa", "#EastAfrica"],
-            "community": ["#KOT", "#KenyanTwitter", "#TikTokKenya", "#KenyanYouth"],
-            "culture": ["#Kenyan", "#Swahili", "#MadeInKenya", "#SupportLocalKE"]
-        }
+        # Create animated WebP (plays like video in browsers)
+        buffer = io.BytesIO()
         
-        # Topic-specific hashtags
-        topic_tags = {
-            "philosophy": ["#Philosophy", "#Wisdom", "#DeepThoughts", "#Stoicism"],
-            "psychology": ["#Psychology", "#Mindfulness", "#MentalHealth", "#SelfCare"],
-            "motivation": ["#Motivation", "#Inspiration", "#Success", "#Hustle"],
-            "spiritual": ["#Spirituality", "#Faith", "#Meditation", "#Peace"],
-            "love": ["#Love", "#Relationships", "#Heart", "#Family"],
-            "business": ["#Business", "#Entrepreneurship", "#HustleKE", "#MoneyMindset"]
-        }
+        # Save as WebP animation (supported in modern browsers)
+        frames[0].save(
+            buffer,
+            format='WEBP',
+            save_all=True,
+            append_images=frames[1:],
+            duration=1000 // ANIMATION_SETTINGS["fps"],  # ms per frame
+            loop=0,
+            quality=90
+        )
         
-        # Platform-specific hashtags
-        platform_tags = {
-            "tiktok": ["#FYP", "#ForYou", "#ForYouPage", "#Viral"],
-            "instagram": ["#InstaGood", "#PhotoOfTheDay", "#IG", "#Reels"],
-            "twitter": ["#Thread", "#QuoteTweet", "#Twitter"],
-            "all": ["#" + BRAND_NAME.lower(), "#Quote", "#DailyQuote", "#ThoughtOfTheDay"]
-        }
-        
-        # Combine based on topic
-        all_tags = []
-        all_tags.extend(kenyan_tags["location"])
-        all_tags.extend(kenyan_tags["community"][:2])  # Limit community tags
-        
-        # Add topic tags
-        for key, tags in topic_tags.items():
-            if key in topic.lower():
-                all_tags.extend(tags[:3])
-                break
-        
-        # Add platform tags
-        all_tags.extend(platform_tags["all"])
-        
-        return {
-            "primary": all_tags[:5],
-            "secondary": all_tags[5:10],
-            "all": all_tags
-        }
-    
-    @staticmethod
-    def generate_caption_variations(caption: str, platform: str) -> str:
-        """Generate platform-specific caption variations"""
-        
-        base_caption = caption
-        
-        if platform == "tiktok":
-            return base_caption + "\n\n" + "👇 Follow for daily wisdom!"
-        
-        elif platform == "instagram":
-            lines = base_caption.split('\n')
-            if len(lines) > 2:
-                return lines[0] + "\n\n" + lines[-1] + "\n\n" + "Double tap if this resonates! ❤️"
-            return base_caption + "\n\n" + "💭 What's your take?"
-        
-        elif platform == "twitter":
-            # Twitter needs to be concise
-            if len(base_caption) > 200:
-                base_caption = base_caption[:197] + "..."
-            return base_caption + "\n\n" + "RT if you agree!"
-        
-        return base_caption
+        return buffer.getvalue()
 
-# ============================================
-# MAIN STREAMLIT APP
-# ============================================
-
+# ============================================================================
+# MINIMAL STREAMLIT UI
+# ============================================================================
 def main():
-    """Main Streamlit application"""
-    
-    # ========== PAGE CONFIG ==========
-    st.set_page_config(
-        page_title=f"{BRAND_NAME} | AI Quote Generator",
-        page_icon="🧠",
-        layout="wide",
-        initial_sidebar_state="expanded",
-        menu_items={
-            'Get Help': 'https://github.com/stillmind',
-            'Report a bug': "https://github.com/stillmind/issues",
-            'About': f"### {BRAND_NAME}\n{BRAND_TAGLINE}\n\nVersion 3.0 | Production"
+    # Hide Streamlit default elements for minimal UI
+    hide_streamlit_style = """
+        <style>
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        .stApp {background: #0d1b2a;}
+        .stButton > button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-weight: 600;
+            transition: all 0.3s;
+            width: 100%;
         }
-    )
+        .stButton > button:hover {
+            background: #388E3C;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+        }
+        .stSelectbox > div > div {
+            background: white;
+            border-radius: 8px;
+        }
+        .stTextInput > div > div > input {
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+        }
+        .quote-preview {
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            margin: 0 auto;
+        }
+        </style>
+    """
+    st.markdown(hide_streamlit_style, unsafe_allow_html=True)
     
-    # ========== CUSTOM CSS ==========
-    st.markdown(f"""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    # Initialize session state
+    if 'current_quote' not in st.session_state:
+        st.session_state.current_quote = QuoteManager.get_random_quote()
+    if 'current_image' not in st.session_state:
+        st.session_state.current_image = None
+    if 'current_frames' not in st.session_state:
+        st.session_state.current_frames = None
     
-    * {{
-        font-family: 'Inter', sans-serif;
-    }}
-    
-    .main-title {{
-        background: linear-gradient(135deg, 
-            rgba({COLORS['dark_blue'][0]}, {COLORS['dark_blue'][1]}, {COLORS['dark_blue'][2]}, 0.9),
-            rgba({COLORS['deep_green'][0]}, {COLORS['deep_green'][1]}, {COLORS['deep_green'][2]}, 0.9));
-        padding: 3rem 2rem;
-        border-radius: 20px;
-        margin-bottom: 2rem;
-        color: white;
-        text-align: center;
-        box-shadow: 0 15px 35px rgba(0,0,0,0.3);
-        border: 1px solid rgba(255,255,255,0.1);
-    }}
-    
-    .main-title h1 {{
-        font-size: 3rem;
-        font-weight: 800;
-        margin-bottom: 0.5rem;
-        background: linear-gradient(135deg, #FFFFFF, #E0E1DD);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-    }}
-    
-    .main-title p {{
-        font-size: 1.2rem;
-        opacity: 0.9;
-        font-weight: 300;
-    }}
-    
-    .kenyan-flag {{
-        display: inline-block;
-        width: 20px;
-        height: 15px;
-        background: linear-gradient(to bottom, 
-            #{COLORS['kenyan_flag_black'][0]:02x}{COLORS['kenyan_flag_black'][1]:02x}{COLORS['kenyan_flag_black'][2]:02x} 33%, 
-            #{COLORS['kenyan_flag_red'][0]:02x}{COLORS['kenyan_flag_red'][1]:02x}{COLORS['kenyan_flag_red'][2]:02x} 33% 66%, 
-            #{COLORS['kenyan_flag_green'][0]:02x}{COLORS['kenyan_flag_green'][1]:02x}{COLORS['kenyan_flag_green'][2]:02x} 66%);
-        margin: 0 5px;
-        border-radius: 2px;
-    }}
-    
-    .stat-card {{
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 15px;
-        padding: 1.5rem;
-        text-align: center;
-        backdrop-filter: blur(10px);
-    }}
-    
-    .stat-number {{
-        font-size: 2rem;
-        font-weight: 700;
-        color: #{COLORS['accent_green'][0]:02x}{COLORS['accent_green'][1]:02x}{COLORS['accent_green'][2]:02x};
-        margin-bottom: 0.5rem;
-    }}
-    
-    .stat-label {{
-        font-size: 0.9rem;
-        color: rgba(255, 255, 255, 0.7);
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }}
-    
-    .generate-btn {{
-        background: linear-gradient(135deg, 
-            #{COLORS['deep_green'][0]:02x}{COLORS['deep_green'][1]:02x}{COLORS['deep_green'][2]:02x},
-            #{COLORS['dark_blue'][0]:02x}{COLORS['dark_blue'][1]:02x}{COLORS['dark_blue'][2]:02x});
-        color: white;
-        border: none;
-        padding: 1.2rem 2.5rem;
-        font-size: 1.1rem;
-        font-weight: 600;
-        border-radius: 50px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        width: 100%;
-        margin: 1rem 0;
-        position: relative;
-        overflow: hidden;
-    }}
-    
-    .generate-btn:hover {{
-        transform: translateY(-3px);
-        box-shadow: 0 15px 30px rgba({COLORS['deep_green'][0]}, {COLORS['deep_green'][1]}, {COLORS['deep_green'][2]}, 0.4);
-    }}
-    
-    .generate-btn:active {{
-        transform: translateY(-1px);
-    }}
-    
-    .tab-content {{
-        background: rgba(255, 255, 255, 0.95);
-        border-radius: 20px;
-        padding: 2rem;
-        margin-top: 1rem;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-        border: 1px solid rgba(0,0,0,0.05);
-    }}
-    
-    .preview-container {{
-        position: relative;
-        width: 100%;
-        aspect-ratio: 1;
-        border-radius: 15px;
-        overflow: hidden;
-        box-shadow: 0 20px 60px rgba(0,0,0,0.25);
-        border: 5px solid white;
-    }}
-    
-    .preview-container img {{
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-    }}
-    
-    .cache-badge {{
-        position: absolute;
-        top: 10px;
-        right: 10px;
-        background: rgba(0,0,0,0.8);
-        color: white;
-        padding: 5px 15px;
-        border-radius: 20px;
-        font-size: 0.8rem;
-        font-weight: 500;
-        backdrop-filter: blur(5px);
-    }}
-    
-    .watermark {{
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        color: rgba({COLORS['accent_green'][0]}, {COLORS['accent_green'][1]}, {COLORS['accent_green'][2]}, 0.05);
-        font-size: 8rem;
-        font-weight: 900;
-        z-index: -1;
-        pointer-events: none;
-        transform: rotate(-30deg);
-    }}
-    
-    .download-btn {{
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 12px 24px;
-        border-radius: 10px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        width: 100%;
-        margin: 5px 0;
-    }}
-    
-    .download-btn:hover {{
-        transform: translateY(-2px);
-        box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
-    }}
-    
-    /* Responsive design */
-    @media (max-width: 768px) {{
-        .main-title h1 {{
-            font-size: 2rem;
-        }}
-        .main-title p {{
-            font-size: 1rem;
-        }}
-        .stat-card {{
-            padding: 1rem;
-        }}
-        .stat-number {{
-            font-size: 1.5rem;
-        }}
-    }}
-    </style>
-    
-    <div class="watermark">{BRAND_NAME.upper()}</div>
-    """, unsafe_allow_html=True)
-    
-    # ========== INITIALIZATION ==========
-    if 'api_manager' not in st.session_state:
-        with st.spinner("🚀 Initializing production system..."):
-            st.session_state.api_manager = APIManager()
-            st.session_state.image_generator = ImageGenerator()
-            st.session_state.generation_count = 0
-            st.session_state.cache_stats = {"hits": 0, "misses": 0}
-            Logger.log("APP_INITIALIZED")
-    
-    # Get instances
-    api = st.session_state.api_manager
-    generator = st.session_state.image_generator
-    
-    # ========== HEADER ==========
-    st.markdown(f"""
-    <div class="main-title">
-        <h1>{BRAND_NAME}</h1>
-        <p>{BRAND_TAGLINE} • Made with <span class="kenyan-flag"></span> for global minds</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # ========== STATS BAR ==========
-    cache_stats = api.cache.get_stats()
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.markdown(f"""
-        <div class="stat-card">
-            <div class="stat-number">{st.session_state.generation_count}</div>
-            <div class="stat-label">Generations</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
+    # Minimal header
+    col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown(f"""
-        <div class="stat-card">
-            <div class="stat-number">{cache_stats['size']}</div>
-            <div class="stat-label">Cached Items</div>
+        st.markdown("""
+        <div style="text-align: center; padding: 1rem 0;">
+            <h1 style="color: #4CAF50; margin-bottom: 0.5rem;">🧠 STILL MIND</h1>
+            <p style="color: #E0E0E0; opacity: 0.8;">Modern quote generator for focused minds</p>
         </div>
         """, unsafe_allow_html=True)
     
-    with col3:
-        st.markdown(f"""
-        <div class="stat-card">
-            <div class="stat-number">{cache_stats['hit_rate']}</div>
-            <div class="stat-label">Cache Hit Rate</div>
-        </div>
-        """, unsafe_allow_html=True)
+    # Main content - minimal controls
+    col_left, col_main, col_right = st.columns([1, 2, 1])
     
-    with col4:
-        st.markdown(f"""
-        <div class="stat-card">
-            <div class="stat-number">{cache_stats['hits']}</div>
-            <div class="stat-label">Cache Hits</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # ========== MAIN CONTENT ==========
-    col_left, col_right = st.columns([2, 1])
-    
-    with col_left:
-        # Topic Input
-        st.markdown("### 📝 Topic Inspiration")
-        
-        # Quick topic buttons
-        st.markdown("**Popular in Kenya:**")
-        kenyan_cols = st.columns(5)
-        kenyan_topics = ["Hustle", "Faith", "Family", "Success", "Love"]
-        
-        for idx, (col, topic) in enumerate(zip(kenyan_cols, kenyan_topics)):
-            with col:
-                if st.button(f"🇰🇪 {topic}", use_container_width=True, key=f"kenyan_{topic}"):
-                    st.session_state.selected_topic = topic.lower()
-                    st.rerun()
-        
-        # Topic input
-        default_topic = st.session_state.get('selected_topic', 'mindfulness')
-        topic = st.text_input(
-            "Or enter your own topic:",
-            value=default_topic,
-            placeholder="e.g., stoicism, business, relationships, mental health...",
-            help="The AI will find relevant quotes for your topic"
-        )
-        
-        # Style selection
-        st.markdown("### 🎨 Visual Style")
-        style = st.selectbox(
-            "Choose artistic style:",
-            ["Auto-detect", "Watercolor", "Minimalist", "Sketch", "Abstract"],
-            index=0,
-            help="Auto-detect uses AI to choose the best style for your quote"
-        )
-        
-        # Platform selection
-        st.markdown("### 📱 Target Platform")
-        platforms = st.multiselect(
-            "Select platforms (for optimization):",
-            ["TikTok", "Instagram Reels", "Instagram Feed", "YouTube Shorts", "Twitter", "Facebook"],
-            default=["TikTok", "Instagram Reels"],
-            help="Content will be optimized for selected platforms"
-        )
-        
-        # Generate button
-        st.markdown("---")
-        if st.button("✨ GENERATE ARTISTIC QUOTE", type="primary", use_container_width=True):
-            with st.spinner("🎨 Creating your masterpiece..."):
-                try:
-                    # Track generation
-                    st.session_state.generation_count += 1
-                    
-                    # Get quote
-                    quote_data = api.get_quote(topic)
-                    
-                    # Generate social content
-                    social_content = api.generate_social_content(
-                        quote_data["content"],
-                        quote_data["author"],
-                        topic
-                    )
-                    
-                    # Determine style
-                    if style == "Auto-detect":
-                        visual_style = social_content.get("visual_style", "watercolor")
-                    else:
-                        visual_style = style.lower()
-                    
-                    # Get background
-                    bg_keywords = social_content.get("background_keywords", ["abstract", "thought"])
-                    background = api.get_background_image(bg_keywords)
-                    
-                    # Generate image
-                    start_time = time.time()
-                    image = generator.create_quote_image(
-                        quote_data["content"],
-                        quote_data["author"],
-                        background,
-                        visual_style
-                    )
-                    
-                    # Generate animation
-                    animation = generator.create_animation(image)
-                    
-                    # Generate story format
-                    story = generator.create_story_format(image)
-                    
-                    # Store results
-                    st.session_state.current_result = {
-                        "quote": quote_data,
-                        "social": social_content,
-                        "image": image,
-                        "animation": animation,
-                        "story": story,
-                        "generation_time": time.time() - start_time,
-                        "topic": topic,
-                        "style": visual_style,
-                        "platforms": platforms,
-                        "timestamp": datetime.datetime.now().isoformat()
+    with col_main:
+        # Minimal controls in expander
+        with st.expander("⚙️ SETTINGS", expanded=False):
+            col_set1, col_set2 = st.columns(2)
+            
+            with col_set1:
+                quote_category = st.selectbox(
+                    "Category",
+                    ["motivation", "wisdom", "success", "mindfulness"],
+                    index=0,
+                    label_visibility="collapsed"
+                )
+            
+            with col_set2:
+                bg_style = st.selectbox(
+                    "Background",
+                    ["wave", "particle", "geometric"],
+                    index=0,
+                    label_visibility="collapsed"
+                )
+            
+            col_set3, col_set4 = st.columns(2)
+            with col_set3:
+                size_option = st.selectbox(
+                    "Size",
+                    list(SIZES.keys()),
+                    index=0,
+                    label_visibility="collapsed"
+                )
+            
+            with col_set4:
+                custom_quote = st.text_input(
+                    "Custom Quote",
+                    placeholder="Enter your own quote...",
+                    label_visibility="collapsed"
+                )
+            
+            # Generate button
+            if st.button("✨ GENERATE", type="primary"):
+                if custom_quote:
+                    st.session_state.current_quote = {
+                        "text": custom_quote,
+                        "author": BRAND_NAME
                     }
-                    
-                    Logger.log("GENERATION_COMPLETE", {
-                        "topic": topic,
-                        "time_taken": st.session_state.current_result["generation_time"]
-                    })
-                    
-                    st.success(f"✅ Generated in {st.session_state.current_result['generation_time']:.2f}s")
-                    
-                except Exception as e:
-                    Logger.error(e, "Generation failed")
-                    st.error("❌ Generation failed. Please try again.")
+                else:
+                    st.session_state.current_quote = QuoteManager.get_random_quote(quote_category)
+                
+                # Generate image
+                generator = ModernQuoteGenerator()
+                img = generator.create_quote_image(
+                    st.session_state.current_quote["text"],
+                    st.session_state.current_quote["author"],
+                    SIZES[size_option],
+                    bg_style
+                )
+                
+                # Generate frames for animation
+                frames = generator.create_animation_frames(
+                    st.session_state.current_quote["text"],
+                    st.session_state.current_quote["author"],
+                    SIZES[size_option],
+                    bg_style
+                )
+                
+                st.session_state.current_image = img
+                st.session_state.current_frames = frames
+                st.session_state.current_size = size_option
+                
+                st.success("Generated!")
     
-    with col_right:
-        st.markdown("### 💡 Quick Tips")
-        
-        with st.expander("🎯 For Kenyan Audience"):
-            st.markdown("""
-            **Top Performing Topics:**
-            - 🇰🇪 **Hustle Culture**: Business, money, success
-            - 🙏 **Faith & Spirituality**: Hope, miracles, blessings
-            - 👨‍👩‍👧‍👦 **Family & Relationships**: Love, marriage, parenting
-            - 🧠 **Mental Health**: Stress, anxiety, peace
-            - 📚 **Education**: Learning, growth, wisdom
-            
-            **Best Posting Times (EAT):**
-            - Weekdays: 7-9 AM, 12-2 PM, 7-10 PM
-            - Weekends: 10 AM - 12 PM, 8-11 PM
-            """)
-        
-        with st.expander("🚀 Growth Strategy"):
-            st.markdown("""
-            **Month 1-3: Foundation**
-            - Post 1-2x daily
-            - Engage with comments
-            - Use relevant hashtags
-            
-            **Month 4-6: Growth**
-            - Collaborate with creators
-            - Run challenges
-            - Cross-post to 3+ platforms
-            
-            **Month 7-12: Monetization**
-            - Sponsored posts
-            - Digital products
-            - Affiliate marketing
-            """)
-        
-        with st.expander("⚙️ Cache Management"):
-            st.markdown(f"""
-            **Current Cache Stats:**
-            - Size: {cache_stats['size']}/{MAX_CACHE_SIZE}
-            - Hit Rate: {cache_stats['hit_rate']}
-            - Hits: {cache_stats['hits']}
-            - Misses: {cache_stats['misses']}
-            """)
-            
-            if st.button("🔄 Clear Cache", use_container_width=True):
-                api.cache.clear()
-                st.success("Cache cleared!")
-                st.rerun()
-    
-    # ========== RESULTS DISPLAY ==========
-    if 'current_result' in st.session_state:
-        result = st.session_state.current_result
-        
-        # Create tabs for different views
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["🎨 Preview", "🎬 Animation", "📱 Story", "📊 Strategy", "💾 Download"])
-        
-        with tab1:
-            col_a, col_b = st.columns([2, 1])
-            
-            with col_a:
-                st.markdown("### 🖼️ Generated Artwork")
-                
-                # Convert image to base64 for display
-                img_bytes = BytesIO()
-                result["image"].save(img_bytes, format='PNG', quality=95)
-                img_base64 = base64.b64encode(img_bytes.getvalue()).decode()
-                
-                st.markdown(f"""
-                <div class="preview-container">
-                    <img src="data:image/png;base64,{img_base64}" alt="Quote Art">
-                    <div class="cache-badge">🔄 {result['generation_time']:.2f}s</div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Image details
-                st.caption(f"**Style:** {result['style'].title()} • **Topic:** {result['topic'].title()} • **Platforms:** {', '.join(result['platforms'])}")
-            
-            with col_b:
-                st.markdown("### 📝 Quote Details")
-                
-                # Quote card
-                st.markdown(f"""
-                <div style="background: rgba({COLORS['dark_blue'][0]}, {COLORS['dark_blue'][1]}, {COLORS['dark_blue'][2]}, 0.1);
-                          padding: 2rem;
-                          border-radius: 15px;
-                          border-left: 5px solid #{COLORS['accent_green'][0]:02x}{COLORS['accent_green'][1]:02x}{COLORS['accent_green'][2]:02x};
-                          margin-bottom: 1.5rem;">
-                    <p style="font-size: 1.3rem; font-style: italic; line-height: 1.6; color: #333;">
-                    "{result['quote']['content']}"
-                    </p>
-                    <p style="text-align: right; font-weight: 600; color: #{COLORS['accent_blue'][0]:02x}{COLORS['accent_blue'][1]:02x}{COLORS['accent_blue'][2]:02x};">
-                    — {result['quote']['author']}
-                    </p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Tags
-                st.markdown("**🏷️ Related Tags:**")
-                tags = result["quote"].get("tags", [])
-                tag_cols = st.columns(4)
-                for idx, tag in enumerate(tags[:8]):
-                    with tag_cols[idx % 4]:
-                        st.markdown(f"`#{tag}`")
-        
-        with tab2:
-            st.markdown("### 🎬 6-Second Animation (12 FPS)")
-            st.markdown("Perfect for TikTok, Instagram Reels, and YouTube Shorts")
-            
-            # Display animation
-            if result["animation"].getvalue():
-                st.video(result["animation"], format="video/mp4", start_time=0)
-            else:
-                st.warning("Animation generation failed. Showing static image.")
-                st.image(result["image"])
-            
-            # Animation specs
-            st.markdown("""
-            **Technical Specifications:**
-            - **Duration:** 6 seconds
-            - **Frame Rate:** 12 FPS (cinematic feel)
-            - **Resolution:** 1080×1080 pixels
-            - **Format:** MP4 (H.264 codec)
-            - **Size:** ~2-3 MB
-            - **Loop:** Perfect seamless loop
-            """)
-            
-            # Usage tips
-            st.markdown("""
-            **🎯 Platform Optimization:**
-            - **TikTok:** Add trending audio from suggestions
-            - **Instagram Reels:** Use first 3 seconds as hook
-            - **YouTube Shorts:** Add end screen with subscribe CTA
-            - **Twitter:** Keep caption under 280 characters
-            """)
-        
-        with tab3:
-            st.markdown("### 📱 Instagram Story Format (9:16)")
-            
-            # Display story
-            story_bytes = BytesIO()
-            result["story"].save(story_bytes, format='PNG')
-            story_base64 = base64.b64encode(story_bytes.getvalue()).decode()
-            
-            st.markdown(f"""
-            <div style="max-width: 300px; margin: 0 auto;">
-                <div style="position: relative; width: 100%; padding-bottom: 177.78%; background: #000; border-radius: 20px; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.3);">
-                    <img src="data:image/png;base64,{story_base64}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover;">
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Story elements suggestions
-            st.markdown("""
-            **➕ Add These Story Elements:**
-            
-            1. **Poll Sticker:** "Does this resonate?"
-            2. **Question Sticker:** "What's your takeaway?"
-            3. **Countdown Sticker:** "New quote in 24h"
-            4. **Music Sticker:** Add suggested audio
-            5. **Mention Sticker:** Tag a friend
-            6. **Location Sticker:** Add relevant location
-            7. **Hashtag Sticker:** #stillmind
-            """)
-        
-        with tab4:
-            st.markdown("### 📊 Social Media Strategy")
-            
-            # Platform-specific strategies
-            platform_cols = st.columns(3)
-            
-            with platform_cols[0]:
-                st.markdown("#### 📱 TikTok")
-                st.markdown(f"""
-                **Caption:**
-                ```
-                {SocialMediaManager.generate_caption_variations(result['social']['caption'], 'tiktok')}
-                ```
-                
-                **Hashtags:**
-                ```python
-                {', '.join(SocialMediaManager.get_hashtag_sets(result['topic'])['primary'])}
-                ```
-                
-                **Audio:** {result['social'].get('audio_suggestion', 'Calm instrumental')}
-                **CTA:** {result['social'].get('call_to_action', 'Follow for more!')}
-                """)
-            
-            with platform_cols[1]:
-                st.markdown("#### 📸 Instagram")
-                st.markdown(f"""
-                **Caption:**
-                ```
-                {SocialMediaManager.generate_caption_variations(result['social']['caption'], 'instagram')}
-                ```
-                
-                **Hashtags:**
-                ```python
-                {', '.join(SocialMediaManager.get_hashtag_sets(result['topic'])['all'][:10])}
-                ```
-                
-                **Post to:** Feed & Reels
-                **Tag:** 3-5 related accounts
-                **Location:** Add if relevant
-                """)
-            
-            with platform_cols[2]:
-                st.markdown("#### 🐦 Twitter")
-                st.markdown(f"""
-                **Tweet:**
-                ```
-                {SocialMediaManager.generate_caption_variations(result['social']['caption'], 'twitter')}
-                ```
-                
-                **Hashtags:**
-                ```python
-                {', '.join(SocialMediaManager.get_hashtag_sets(result['topic'])['primary'][:3])}
-                ```
-                
-                **Thread Idea:** 
-                - Tweet 1: Quote image
-                - Tweet 2: Personal interpretation
-                - Tweet 3: Ask for replies
-                """)
-            
-            # Analytics dashboard (mock)
-            st.markdown("---")
-            st.markdown("#### 📈 Performance Predictions")
-            
-            pred_cols = st.columns(4)
-            with pred_cols[0]:
-                st.metric("Expected Reach", "5K-10K", "+25%")
-            with pred_cols[1]:
-                st.metric("Engagement Rate", "8-12%", "+3%")
-            with pred_cols[2]:
-                st.metric("Shares", "50-100", "+15")
-            with pred_cols[3]:
-                st.metric("Saves", "100-200", "+30")
-            
-            # Posting schedule
-            st.markdown("#### 🗓️ Recommended Posting Schedule")
-            schedule = SocialMediaManager.generate_posting_schedule()
-            
-            schedule_cols = st.columns(len(schedule["kenya_eat"]))
-            for idx, (platform, times) in enumerate(schedule["kenya_eat"].items()):
-                with schedule_cols[idx]:
-                    st.markdown(f"**{platform.title()}**")
-                    for t in times[:3]:
-                        st.markdown(f"- {t} EAT")
-        
-        with tab5:
-            st.markdown("### 💾 Download Assets")
-            
-            # File formats
-            format_cols = st.columns(4)
-            
-            with format_cols[0]:
-                # PNG Download
-                png_buffer = BytesIO()
-                result["image"].save(png_buffer, format='PNG', quality=100)
-                st.download_button(
-                    label="📸 Download PNG",
-                    data=png_buffer.getvalue(),
-                    file_name=f"stillmind_{result['topic'].replace(' ', '_')}.png",
-                    mime="image/png",
-                    use_container_width=True
-                )
-            
-            with format_cols[1]:
-                # MP4 Download
-                st.download_button(
-                    label="🎬 Download MP4",
-                    data=result["animation"].getvalue(),
-                    file_name=f"stillmind_{result['topic'].replace(' ', '_')}_animation.mp4",
-                    mime="video/mp4",
-                    use_container_width=True
-                )
-            
-            with format_cols[2]:
-                # Story Download
-                story_buffer = BytesIO()
-                result["story"].save(story_buffer, format='PNG', quality=100)
-                st.download_button(
-                    label="📱 Download Story",
-                    data=story_buffer.getvalue(),
-                    file_name=f"stillmind_{result['topic'].replace(' ', '_')}_story.png",
-                    mime="image/png",
-                    use_container_width=True
-                )
-            
-            with format_cols[3]:
-                # Content Bundle
-                content = f"""# {BRAND_NAME} - Social Media Content
-                
-Topic: {result['topic']}
-Generated: {result['timestamp']}
-                
-## Quote
-"{result['quote']['content']}"
-— {result['quote']['author']}
-                
-## Social Media Content
-                
-### TikTok/Instagram Caption
-{result['social']['caption']}
-                
-### Hashtags
-{result['social']['hashtags']}
-                
-### Visual Style
-{result['social'].get('visual_style', 'watercolor')}
-                
-### Audio Suggestion
-{result['social'].get('audio_suggestion', 'Calm instrumental')}
-                
-### Call to Action
-{result['social'].get('call_to_action', 'Share your thoughts!')}
-                
-### Posting Time
-{result['social'].get('posting_time_suggestion', '7-9 PM EAT')}
-                
-## Platform-Specific Strategies
-                
-TikTok Strategy
-- Duration: 6 seconds
-- Hook: First 3 seconds
-- Audio: {result['social'].get('audio_suggestion', 'Trending sound')}
-- CTA: Ask question in comments
-                
-Instagram Strategy
-- Post to: Feed & Reels
-- Stories: Add interactive stickers
-- Hashtags: 10-15 relevant
-- Location: Add if relevant
-                
-## Analytics Targets
-- Expected Reach: 5,000-10,000
-- Engagement Rate: 8-12%
-- Shares: 50-100
-- Saves: 100-200
-                """
-                
-                st.download_button(
-                    label="📄 Content Bundle",
-                    data=content,
-                    file_name=f"stillmind_{result['topic'].replace(' ', '_')}_bundle.txt",
-                    mime="text/plain",
-                    use_container_width=True
-                )
-            
-            # Batch generation
-            st.markdown("---")
-            st.markdown("#### 🔄 Batch Generation")
-            
-            batch_cols = st.columns(3)
-            with batch_cols[0]:
-                if st.button("🔄 Same Quote, New Style", use_container_width=True):
-                    st.session_state.current_result = None
-                    st.rerun()
-            
-            with batch_cols[1]:
-                if st.button("🎲 Random Topic", use_container_width=True):
-                    random_topics = ["wisdom", "success", "love", "mindfulness", "business"]
-                    st.session_state.selected_topic = random.choice(random_topics)
-                    st.session_state.current_result = None
-                    st.rerun()
-            
-            with batch_cols[2]:
-                if st.button("📅 Weekly Content", use_container_width=True):
-                    st.info("Coming soon: Generate 7 days of content at once!")
-    
-    # ========== FOOTER ==========
+    # Display area (full width below controls)
     st.markdown("---")
     
-    col_left, col_center, col_right = st.columns(3)
+    if st.session_state.current_image:
+        # Preview
+        col_preview1, col_preview2, col_preview3 = st.columns([1, 3, 1])
+        
+        with col_preview2:
+            st.markdown(f'<div class="quote-preview">', unsafe_allow_html=True)
+            st.image(st.session_state.current_image, use_column_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Minimal info
+            st.caption(f"📐 {st.session_state.current_size} • 🎨 {bg_style.title()} • ⏱️ {ANIMATION_SETTINGS['duration']}s")
+            
+            # Download buttons
+            col_dl1, col_dl2 = st.columns(2)
+            
+            with col_dl1:
+                # JPEG Download
+                img_buffer = io.BytesIO()
+                st.session_state.current_image.save(
+                    img_buffer, 
+                    format='JPEG', 
+                    quality=95,
+                    optimize=True
+                )
+                
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                st.download_button(
+                    label="📥 DOWNLOAD JPEG",
+                    data=img_buffer.getvalue(),
+                    file_name=f"stillmind_quote_{timestamp}.jpg",
+                    mime="image/jpeg",
+                    use_container_width=True
+                )
+            
+            with col_dl2:
+                # Video Download
+                if st.session_state.current_frames:
+                    video_data = VideoGenerator.frames_to_video_bytes(
+                        st.session_state.current_frames
+                    )
+                    
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    st.download_button(
+                        label="🎬 DOWNLOAD ANIMATION",
+                        data=video_data,
+                        file_name=f"stillmind_quote_{timestamp}.webp",
+                        mime="image/webp",
+                        use_container_width=True
+                    )
+            
+            # Quick actions
+            st.markdown("---")
+            col_action1, col_action2 = st.columns(2)
+            
+            with col_action1:
+                if st.button("🔄 NEW QUOTE", use_container_width=True):
+                    # Clear and regenerate
+                    st.session_state.current_image = None
+                    st.session_state.current_frames = None
+                    st.rerun()
+            
+            with col_action2:
+                if st.button("🎲 RANDOM STYLE", use_container_width=True):
+                    # Keep quote, change style
+                    st.rerun()
     
-    with col_left:
-        st.markdown(f"""
-        <div style="text-align: center; color: #666;">
-            <p><strong>{BRAND_NAME}</strong> v3.0</p>
-            <p style="font-size: 0.9rem;">Production Ready</p>
-        </div>
-        """, unsafe_allow_html=True)
+    else:
+        # Empty state
+        col_empty1, col_empty2, col_empty3 = st.columns([1, 2, 1])
+        with col_empty2:
+            st.markdown("""
+            <div style="text-align: center; padding: 4rem; color: #9E9E9E;">
+                <h3>👆 Configure & Generate</h3>
+                <p>Select your preferences and click GENERATE to create your first quote.</p>
+            </div>
+            """, unsafe_allow_html=True)
     
-    with col_center:
-        st.markdown("""
-        <div style="text-align: center; color: #666;">
-            <p>Built with ❤️ for creators</p>
-            <p style="font-size: 0.8rem;">Powered by AI & Art</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col_right:
-        st.markdown("""
-        <div style="text-align: center; color: #666;">
-            <p>© 2024 Still Mind</p>
-            <p style="font-size: 0.8rem;">All rights reserved</p>
-        </div>
-        """, unsafe_allow_html=True)
+    # Minimal footer
+    st.markdown("""
+    <div style="text-align: center; color: #616161; padding: 2rem 0; font-size: 0.9rem;">
+        <p>🧠 {brand} • Modern minimal design • Focus on what matters</p>
+    </div>
+    """.format(brand=BRAND_NAME), unsafe_allow_html=True)
 
-# ============================================
-# ENTRY POINT
-# ============================================
+# ============================================================================
+# RUN APP
+# ============================================================================
 if __name__ == "__main__":
-    # Check for required secrets
-    required_secrets = ["groq_key", "pexels_api_key"]
-    
-    try:
-        # Check if Streamlit secrets are available
-        if hasattr(st, 'secrets'):
-            # Check if all required secrets exist
-            missing_secrets = []
-            for secret in required_secrets:
-                if secret not in st.secrets:
-                    missing_secrets.append(secret)
-            
-            if missing_secrets:
-                st.error(f"❌ Missing secrets: {', '.join(missing_secrets)}")
-                st.info("Please add these to your Streamlit secrets.")
-                st.stop()
-            
-            # Run the app
-            main()
-        else:
-            st.error("❌ Streamlit secrets not found. Please configure your secrets.")
-            st.info("""
-            For local development, create a `.streamlit/secrets.toml` file with:
-            
-            groq_key = "your_groq_api_key_here"
-            pexels_api_key = "your_pexels_api_key_here"
-            """)
-    except Exception as e:
-        st.error(f"🚨 Application error: {str(e)}")
-        Logger.error(e, "App crashed")
+    # No external dependencies required
+    main()
