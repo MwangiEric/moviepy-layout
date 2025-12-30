@@ -30,7 +30,8 @@ BRAND_COLORS = {
     
     "white": (255, 255, 255, 255),              # #FFFFFF
     "white_warm": (250, 250, 245, 255),         # #FAFAF5
-    
+
+    "grey_lighter": (245, 245, 245, 255),         # #BDBDBD
     "grey_light": (189, 189, 189, 255),         # #BDBDBD
     "grey_medium": (117, 117, 117, 255),        # #757575
     "grey_dark": (66, 66, 66, 255),             # #424242
