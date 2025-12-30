@@ -1,475 +1,659 @@
 import streamlit as st
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-import io, os, math, time, requests
+from PIL import Image, ImageDraw, ImageFont
+import io, os, math, time, json, requests, textwrap
 import numpy as np
 from moviepy.editor import VideoClip
 import tempfile
-from functools import lru_cache
+from groq import Groq
 
 # ============================================================================
-# STREAMLIT CONFIGURATION
+# SETUP & CONFIGURATION
 # ============================================================================
 st.set_page_config(
-    page_title="Nature Motion Studio",
+    page_title="Still Mind Nature",
     page_icon="🌿",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
-# Hide Streamlit branding
-hide_streamlit_style = """
-<style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    .stDeployButton {display: none;}
-    div[data-testid="stToolbar"] {display: none;}
-    .reportview-container .main .block-container {
-        padding-top: 0rem;
-        padding-left: 1rem;
-        padding-right: 1rem;
-    }
-</style>
-"""
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
-
 # ============================================================================
-# MODERN COLOR PALETTE
+# BRAND COLOR PALETTE (Green, Navy Blue, White, Grey)
 # ============================================================================
-COLORS = {
-    # Primary colors
-    "deep_blue": (13, 36, 56, 255),       # #0D2438
-    "forest_green": (41, 128, 99, 255),   # #298063
-    "sand": (237, 221, 195, 255),         # #EDDDC3
-    "sunset": (255, 147, 79, 255),        # #FF934F
+BRAND_COLORS = {
+    "primary_green": (76, 175, 80, 255),        # #4CAF50
+    "primary_green_light": (129, 199, 132, 255),  # #81C784
+    "primary_green_dark": (56, 142, 60, 255),   # #388E3C
     
-    # Accents
-    "mist": (255, 255, 255, 180),         # #FFFFFF
-    "shadow": (0, 0, 0, 80),              # #000000
-    "glow": (255, 255, 255, 120),         # #FFFFFF
+    "primary_navy": (13, 71, 161, 255),         # #0D47A1
+    "primary_navy_light": (66, 165, 245, 255),  # #42A5F5
+    "primary_navy_dark": (5, 35, 80, 255),      # #052350
     
-    # Text
-    "text_light": (250, 250, 250, 255),   # #FAFAFA
-    "text_dark": (33, 33, 33, 255),       # #212121
+    "white": (255, 255, 255, 255),              # #FFFFFF
+    "white_warm": (250, 250, 245, 255),         # #FAFAF5
+    
+    "grey_light": (189, 189, 189, 255),         # #BDBDBD
+    "grey_medium": (117, 117, 117, 255),        # #757575
+    "grey_dark": (66, 66, 66, 255),             # #424242
+    "grey_darker": (33, 33, 33, 255)            # #212121
 }
 
 # ============================================================================
-# FLAT NATURE THEMES WITH ANIMATION PARAMETERS
+# NATURE THEMES WITH FLAT DESIGN
 # ============================================================================
 NATURE_THEMES = {
+    "Sunset Valley": {
+        "background": BRAND_COLORS["primary_navy_dark"],
+        "sky_gradient": [
+            BRAND_COLORS["primary_navy"],
+            BRAND_COLORS["primary_navy_light"],
+            (255, 193, 7, 255)  # Sunset yellow
+        ],
+        "ground": BRAND_COLORS["grey_dark"],
+        "accents": [
+            BRAND_COLORS["primary_green"],
+            (255, 152, 0, 255)  # Orange accent
+        ],
+        "text_color": BRAND_COLORS["white"]
+    },
+    "Mountain Stream": {
+        "background": BRAND_COLORS["grey_lighter"],
+        "sky_gradient": [
+            BRAND_COLORS["primary_navy_light"],
+            BRAND_COLORS["white_warm"]
+        ],
+        "ground": BRAND_COLORS["primary_green_dark"],
+        "water": BRAND_COLORS["primary_navy_light"],
+        "accents": [
+            BRAND_COLORS["primary_green"],
+            BRAND_COLORS["grey_medium"]
+        ],
+        "text_color": BRAND_COLORS["grey_darker"]
+    },
     "Desert Dunes": {
-        "bg": COLORS["sand"],
-        "sky": (255, 248, 235, 255),
-        "sand_layers": [
-            (217, 193, 166, 255),
-            (194, 173, 149, 255),
-            (171, 153, 132, 255)
+        "background": (255, 243, 224, 255),  # Sand color
+        "sky_gradient": [
+            BRAND_COLORS["primary_navy_light"],
+            (255, 224, 178, 255)  # Light sand
         ],
-        "sun": (255, 213, 79, 255),
-        "shadow": (194, 173, 149, 255),
-        "animation": {
-            "dune_speed": 0.3,
-            "sun_speed": 0.1,
-            "cloud_speed": 0.2
-        }
+        "ground": (216, 67, 21, 255),  # Terracotta
+        "accents": [
+            BRAND_COLORS["primary_green"],
+            BRAND_COLORS["grey_dark"]
+        ],
+        "text_color": BRAND_COLORS["grey_darker"]
     },
-    "Mountain Fog": {
-        "bg": COLORS["deep_blue"],
-        "sky": (66, 135, 245, 255),
-        "mountains": [
-            (41, 128, 99, 255),
-            (31, 97, 74, 255),
-            (21, 66, 49, 255)
+    "Forest Path": {
+        "background": BRAND_COLORS["primary_green_dark"],
+        "sky_gradient": [
+            BRAND_COLORS["primary_navy"],
+            BRAND_COLORS["primary_green_light"]
         ],
-        "fog": (255, 255, 255, 120),
-        "water": (66, 165, 245, 255),
-        "animation": {
-            "fog_speed": 0.4,
-            "cloud_speed": 0.25,
-            "water_speed": 0.5
-        }
-    },
-    "Forest Dawn": {
-        "bg": (13, 36, 56, 255),
-        "sky": (255, 147, 79, 255),
-        "trees": [
-            (41, 128, 99, 255),
-            (31, 97, 74, 255),
-            (21, 66, 49, 255)
+        "ground": BRAND_COLORS["grey_dark"],
+        "accents": [
+            BRAND_COLORS["primary_green_light"],
+            BRAND_COLORS["white"]
         ],
-        "sun": (255, 213, 79, 255),
-        "mist": (255, 255, 255, 60),
-        "animation": {
-            "leaf_speed": 0.6,
-            "mist_speed": 0.35,
-            "sun_speed": 0.15
-        }
-    },
-    "Ocean Waves": {
-        "bg": (13, 36, 56, 255),
-        "sky": (66, 135, 245, 255),
-        "water_layers": [
-            (66, 165, 245, 255),
-            (33, 150, 243, 255),
-            (21, 101, 192, 255)
-        ],
-        "foam": (255, 255, 255, 200),
-        "sun": (255, 213, 79, 255),
-        "animation": {
-            "wave_speed": 0.8,
-            "foam_speed": 0.4,
-            "cloud_speed": 0.2
-        }
+        "text_color": BRAND_COLORS["white"]
     }
 }
 
 # ============================================================================
-# FLAT DESIGN BACKGROUND GENERATOR
+# BIBLE API FUNCTION
 # ============================================================================
-def create_flat_background(width, height, theme_name, time_offset=0):
-    """Create animated flat design nature background"""
-    theme = NATURE_THEMES[theme_name]
-    img = Image.new("RGBA", (width, height), theme["bg"])
+@st.cache_data(ttl=3600)
+def get_bible_verse(book, chapter, verse):
+    """Fetch Bible verse from API with fallback."""
+    try:
+        url = f"https://bible-api.com/{book}+{chapter}:{verse}"
+        response = requests.get(url, timeout=5)
+        
+        if response.status_code == 200:
+            data = response.json()
+            text = data.get("text", "").replace("\n", " ").strip()
+            reference = data.get("reference", f"{book} {chapter}:{verse}")
+            return text, reference
+    except Exception as e:
+        st.warning(f"Could not fetch verse from API: {str(e)}")
+    
+    # Fallback verses
+    fallback_verses = [
+        "Be still, and know that I am God.",
+        "The Lord is my shepherd; I shall not want.",
+        "I can do all things through Christ who strengthens me.",
+        "Peace I leave with you; my peace I give to you.",
+        "For God so loved the world that he gave his only Son."
+    ]
+    
+    # Get a consistent fallback based on book/chapter/verse
+    index = (hash(f"{book}{chapter}{verse}") % len(fallback_verses))
+    return fallback_verses[index], f"{book} {chapter}:{verse}"
+
+# ============================================================================
+# GROQ AI INTEGRATION
+# ============================================================================
+def get_groq_client():
+    """Initialize Groq client with API key from secrets."""
+    try:
+        api_key = st.secrets.get("groq_key")
+        if not api_key:
+            st.error("Groq API key not found in secrets. Please add 'groq_key' to your secrets.toml file.")
+            return None
+        return Groq(api_key=api_key)
+    except Exception as e:
+        st.error(f"Error initializing Groq client: {str(e)}")
+        return None
+
+def generate_hook_with_ai(verse_text, theme_name):
+    """Generate a creative hook/title using AI."""
+    client = get_groq_client()
+    if not client:
+        return "STILL MIND"
+    
+    try:
+        prompt = f"""Generate a short, powerful title (max 3 words) for a scripture graphic.
+        Verse: {verse_text}
+        Theme: {theme_name}
+        Style: Modern, spiritual, minimal
+        
+        Requirements:
+        - 1-3 words maximum
+        - Title case
+        - No quotation marks
+        - Relevant to the verse
+        - Works as social media hook
+        
+        Examples:
+        "Be Still" for Psalm 46:10
+        "Peace Like A River" for Isaiah 26:3
+        "Morning Grace" for Lamentations 3:22-23
+        
+        Title:"""
+        
+        response = client.chat.completions.create(
+            model="mixtral-8x7b-32768",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=20,
+            temperature=0.7
+        )
+        
+        hook = response.choices[0].message.content.strip()
+        # Clean up the response
+        hook = hook.replace('"', '').replace("'", "").strip()
+        if len(hook.split()) > 5:  # If too long, fallback
+            return "STILL MIND"
+        return hook.upper()
+        
+    except Exception as e:
+        st.warning(f"AI hook generation failed: {str(e)}")
+        return "STILL MIND"
+
+def generate_social_caption_with_ai(verse_text, reference, hook, theme_name):
+    """Generate social media caption using AI."""
+    client = get_groq_client()
+    if not client:
+        return f"{hook}\n\n{verse_text[:100]}...\n\n{reference}\n\n#StillMind #Scripture #Faith"
+    
+    try:
+        prompt = f"""Generate a social media caption for a scripture graphic.
+        
+        Hook/Title: {hook}
+        Verse: {verse_text}
+        Reference: {reference}
+        Theme: {theme_name}
+        
+        Requirements:
+        - Include 3-5 relevant hashtags
+        - Format: Hook first, then verse excerpt (1-2 lines), then reference, then hashtags
+        - Keep under 220 characters
+        - Make it engaging and shareable
+        - Add a call to action if appropriate
+        
+        Caption:"""
+        
+        response = client.chat.completions.create(
+            model="mixtral-8x7b-32768",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=100,
+            temperature=0.7
+        )
+        
+        caption = response.choices[0].message.content.strip()
+        return caption
+        
+    except Exception as e:
+        st.warning(f"AI caption generation failed: {str(e)}")
+        # Fallback caption
+        return f"""{hook}
+
+{verse_text[:100]}...
+
+📖 {reference}
+
+#StillMind #Scripture #Faith #{theme_name.replace(' ', '')}"""
+
+# ============================================================================
+# FLAT NATURE BACKGROUND GENERATORS
+# ============================================================================
+def create_flat_background(width, height, theme, time_offset=0):
+    """Create flat design nature background."""
+    colors = theme
+    
+    img = Image.new("RGBA", (width, height), colors["background"])
     draw = ImageDraw.Draw(img)
     
-    # Draw animated sky gradient
-    sky_height = height // 3
-    for y in range(sky_height):
-        # Simple gradient with subtle wave animation
-        wave = math.sin(y * 0.02 + time_offset * 0.5) * 5
-        ratio = y / sky_height
-        
-        # Animate gradient colors
-        r = int(theme["sky"][0] * (1 - ratio) + theme["bg"][0] * ratio)
-        g = int(theme["sky"][1] * (1 - ratio) + theme["bg"][1] * ratio)
-        b = int(theme["sky"][2] * (1 - ratio) + theme["bg"][2] * ratio)
-        
-        # Add animated wave effect
-        if y % 3 == 0:
-            draw.line([(0, y + int(wave)), (width, y + int(wave))], 
-                     fill=(r, g, b, 255), width=3)
+    # Draw sky gradient
+    gradient_height = height * 0.6
+    gradient_colors = colors.get("sky_gradient", [colors["background"], colors["background"]])
     
-    # Theme-specific flat animations
-    if "Desert" in theme_name:
-        # Animated dunes
-        dune_height = height // 4
+    if len(gradient_colors) > 1:
+        for y in range(int(gradient_height)):
+            ratio = y / gradient_height
+            if len(gradient_colors) == 2:
+                r = int(gradient_colors[0][0] * (1-ratio) + gradient_colors[1][0] * ratio)
+                g = int(gradient_colors[0][1] * (1-ratio) + gradient_colors[1][1] * ratio)
+                b = int(gradient_colors[0][2] * (1-ratio) + gradient_colors[1][2] * ratio)
+            else:  # 3 colors
+                if ratio < 0.5:
+                    r = int(gradient_colors[0][0] * (1-ratio*2) + gradient_colors[1][0] * (ratio*2))
+                    g = int(gradient_colors[0][1] * (1-ratio*2) + gradient_colors[1][1] * (ratio*2))
+                    b = int(gradient_colors[0][2] * (1-ratio*2) + gradient_colors[1][2] * (ratio*2))
+                else:
+                    r = int(gradient_colors[1][0] * (2-ratio*2) + gradient_colors[2][0] * (ratio*2-1))
+                    g = int(gradient_colors[1][1] * (2-ratio*2) + gradient_colors[2][1] * (ratio*2-1))
+                    b = int(gradient_colors[1][2] * (2-ratio*2) + gradient_colors[2][2] * (ratio*2-1))
+            
+            draw.line([(0, y), (width, y)], fill=(r, g, b, 255))
+    
+    # Draw ground
+    ground_y = int(height * 0.6)
+    draw.rectangle([0, ground_y, width, height], fill=colors.get("ground", colors["background"]))
+    
+    # Theme-specific elements
+    theme_name = list(NATURE_THEMES.keys())[list(NATURE_THEMES.values()).index(theme)]
+    
+    if "Sunset" in theme_name:
+        # Draw flat sun
+        sun_size = 80
+        sun_x = width * 0.8
+        sun_y = height * 0.2
+        
+        # Sun glow (layered circles)
+        for i in range(3, 0, -1):
+            glow_size = sun_size + i * 20
+            glow_alpha = 100 - i * 30
+            draw.ellipse([sun_x-glow_size, sun_y-glow_size, 
+                         sun_x+glow_size, sun_y+glow_size],
+                        fill=colors["accents"][1][:3] + (glow_alpha,))
+        
+        # Sun body
+        draw.ellipse([sun_x-sun_size, sun_y-sun_size, 
+                     sun_x+sun_size, sun_y+sun_size],
+                    fill=colors["accents"][1])
+        
+        # Distant hills
+        for i in range(3):
+            hill_height = 40 + i * 20
+            hill_width = 300 + i * 100
+            hill_x = width * 0.1 + i * 150 + math.sin(time_offset + i) * 20
+            hill_y = ground_y - hill_height
+            
+            points = [
+                (hill_x, hill_y),
+                (hill_x + hill_width * 0.3, hill_y - hill_height * 0.5),
+                (hill_x + hill_width * 0.7, hill_y - hill_height * 0.3),
+                (hill_x + hill_width, hill_y),
+                (hill_x + hill_width, ground_y),
+                (hill_x, ground_y)
+            ]
+            
+            hill_color = tuple(max(0, c-30*i) for c in colors["ground"][:3]) + (255,)
+            draw.polygon(points, fill=hill_color)
+    
+    elif "Mountain" in theme_name:
+        # Draw flat mountains
+        for i in range(4):
+            mountain_width = 300 + i * 50
+            mountain_height = 80 + i * 30
+            mountain_x = width * (0.1 + i * 0.2) + math.sin(time_offset + i) * 15
+            mountain_y = ground_y - mountain_height
+            
+            # Mountain shape (triangle)
+            points = [
+                (mountain_x, mountain_y + mountain_height),
+                (mountain_x + mountain_width//2, mountain_y),
+                (mountain_x + mountain_width, mountain_y + mountain_height)
+            ]
+            
+            mountain_color = tuple(max(0, c-20*i) for c in colors["ground"][:3]) + (255,)
+            draw.polygon(points, fill=mountain_color)
+            
+            # Snow caps on taller mountains
+            if i > 1:
+                snow_height = 20
+                snow_points = [
+                    (mountain_x + mountain_width//2 - 30, mountain_y + snow_height),
+                    (mountain_x + mountain_width//2, mountain_y),
+                    (mountain_x + mountain_width//2 + 30, mountain_y + snow_height)
+                ]
+                draw.polygon(snow_points, fill=BRAND_COLORS["white"])
+        
+        # Draw river
+        if "water" in colors:
+            river_width = 150
+            river_x = width // 2 - river_width // 2
+            river_points = [
+                (river_x, ground_y),
+                (river_x + river_width, ground_y),
+                (river_x + river_width*0.7, height),
+                (river_x + river_width*0.3, height)
+            ]
+            draw.polygon(river_points, fill=colors["water"])
+            
+            # River flow lines
+            for i in range(5):
+                flow_y = ground_y + i * 30
+                flow_wave = math.sin(time_offset * 2 + i) * 20
+                draw.line([(river_x + 20, flow_y + flow_wave),
+                          (river_x + river_width - 20, flow_y + flow_wave)],
+                         fill=BRAND_COLORS["primary_navy_dark"], width=2)
+    
+    elif "Desert" in theme_name:
+        # Draw sand dunes
         for i in range(5):
-            dune_y = height // 2 + i * (dune_height // 3)
+            dune_width = 400
+            dune_height = 60 + i * 15
+            dune_x = width * (0.05 + i * 0.18) - (time_offset * 50) % width
+            dune_y = ground_y + i * 40
             
-            # Calculate dune position with animation
-            offset = math.sin(time_offset * theme["animation"]["dune_speed"] + i) * 50
-            dune_width = width + abs(offset) * 2
-            
-            # Create dune shape
+            # Dune shape (curved)
             points = []
-            for x in range(0, dune_width, 20):
-                x_pos = x - offset
-                wave = math.sin(x * 0.01 + time_offset + i) * 40
-                y_pos = dune_y + wave * (1 - i/5)
+            for x in range(0, dune_width + 20, 20):
+                x_pos = dune_x + x
+                y_pos = dune_y + dune_height * math.sin(x / dune_width * math.pi)
                 points.append((x_pos, y_pos))
             
             # Close the shape
-            if points:
-                points.append((width, height))
-                points.append((0, height))
-                draw.polygon(points, fill=theme["sand_layers"][i % len(theme["sand_layers"])])
-        
-        # Animated sun
-        sun_size = 80
-        sun_x = width * 0.8 + math.sin(time_offset * theme["animation"]["sun_speed"]) * 20
-        sun_y = height * 0.3 + math.cos(time_offset * theme["animation"]["sun_speed"]) * 10
-        
-        # Sun glow
-        for size in range(sun_size, sun_size + 40, 10):
-            alpha = 80 - (size - sun_size) * 2
-            draw.ellipse([sun_x - size, sun_y - size, sun_x + size, sun_y + size],
-                        fill=theme["sun"][:3] + (alpha,))
-        
-        # Sun body
-        draw.ellipse([sun_x - sun_size, sun_y - sun_size, sun_x + sun_size, sun_y + sun_size],
-                    fill=theme["sun"])
-    
-    elif "Mountain" in theme_name:
-        # Animated mountain layers
-        for layer in range(3):
-            mountain_color = theme["mountains"][layer % len(theme["mountains"])]
-            mountain_height = 200 - layer * 40
-            mountain_y = height // 2 + layer * 20
+            points.append((dune_x + dune_width, height))
+            points.append((dune_x, height))
             
-            # Animate mountains slightly
-            offset = math.sin(time_offset * 0.2 + layer) * 30
-            
-            for i in range(-1, 3):
-                mountain_width = 300 + layer * 50
-                mountain_x = i * 350 + offset * (layer + 1)
-                
-                # Simple mountain triangle
-                points = [
-                    (mountain_x, mountain_y + mountain_height),
-                    (mountain_x + mountain_width // 2, mountain_y),
-                    (mountain_x + mountain_width, mountain_y + mountain_height)
-                ]
-                draw.polygon(points, fill=mountain_color)
+            dune_color = tuple(min(255, c + 20*i) for c in colors["ground"][:3]) + (255,)
+            draw.polygon(points, fill=dune_color)
         
-        # Animated fog
-        fog_height = 60
-        fog_y = height // 2 - 50
-        fog_offset = time_offset * theme["animation"]["fog_speed"] * 100
+        # Draw cactus
+        cactus_x = width * 0.7
+        cactus_y = ground_y + 50
+        cactus_width = 30
+        cactus_height = 120
         
-        for i in range(3):
-            fog_width = 400
-            fog_x = i * 450 + fog_offset % 450
-            
-            # Create fog shape with rounded ends
-            fog_rect = [fog_x, fog_y, fog_x + fog_width, fog_y + fog_height]
-            draw.rounded_rectangle(fog_rect, radius=30, fill=theme["fog"])
-            
-            # Add subtle animation to fog opacity
-            pulse = abs(math.sin(time_offset + i)) * 0.3 + 0.7
-            fog_overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-            fog_draw = ImageDraw.Draw(fog_overlay)
-            fog_draw.rounded_rectangle(fog_rect, radius=30, 
-                                      fill=theme["fog"][:3] + (int(theme["fog"][3] * pulse),))
-            img = Image.alpha_composite(img, fog_overlay)
+        # Cactus body
+        draw.rounded_rectangle([cactus_x-cactus_width//2, cactus_y,
+                               cactus_x+cactus_width//2, cactus_y+cactus_height],
+                              radius=15, fill=BRAND_COLORS["primary_green_dark"])
+        
+        # Cactus arms
+        draw.rounded_rectangle([cactus_x-cactus_width//2, cactus_y+40,
+                               cactus_x-cactus_width//2-40, cactus_y+80],
+                              radius=10, fill=BRAND_COLORS["primary_green_dark"])
+        draw.rounded_rectangle([cactus_x+cactus_width//2, cactus_y+60,
+                               cactus_x+cactus_width//2+40, cactus_y+100],
+                              radius=10, fill=BRAND_COLORS["primary_green_dark"])
     
     elif "Forest" in theme_name:
-        # Animated tree layers
-        tree_width = 80
-        tree_spacing = 120
-        
-        for i in range(10):
-            # Animate trees moving slightly
-            tree_offset = math.sin(time_offset * 0.3 + i) * 10
-            tree_x = i * tree_spacing + tree_offset
-            tree_height = 150 + (i % 3) * 30
+        # Draw trees
+        for i in range(8):
+            tree_x = width * (0.1 + i * 0.11) + math.sin(time_offset + i) * 10
+            tree_y = ground_y
             
             # Tree trunk
-            trunk_width = 20
-            trunk_height = 60
-            draw.rectangle([
-                tree_x + tree_width//2 - trunk_width//2, height//2 + tree_height - trunk_height,
-                tree_x + tree_width//2 + trunk_width//2, height//2 + tree_height
-            ], fill=(101, 67, 33, 255))
+            trunk_height = 80 + i * 10
+            trunk_width = 15 + i * 2
+            draw.rectangle([tree_x-trunk_width//2, tree_y,
+                           tree_x+trunk_width//2, tree_y-trunk_height],
+                          fill=BRAND_COLORS["grey_dark"])
             
-            # Tree canopy (simple circles)
-            canopy_layers = 3
-            for layer in range(canopy_layers):
-                canopy_size = tree_width - layer * 20
-                canopy_y = height//2 + tree_height - trunk_height - layer * 40
-                
-                # Slight canopy movement
-                canopy_wave = math.sin(time_offset * theme["animation"]["leaf_speed"] + i + layer) * 5
-                
-                draw.ellipse([
-                    tree_x + (tree_width - canopy_size)//2,
-                    canopy_y + canopy_wave,
-                    tree_x + (tree_width + canopy_size)//2,
-                    canopy_y + canopy_size + canopy_wave
-                ], fill=theme["trees"][layer % len(theme["trees"])])
-        
-        # Animated sun rays
-        sun_x = width * 0.2
-        sun_y = height * 0.3
-        sun_size = 60
-        
-        # Sun body
-        draw.ellipse([sun_x - sun_size, sun_y - sun_size, sun_x + sun_size, sun_y + sun_size],
-                    fill=theme["sun"])
-        
-        # Sun rays animation
-        for ray in range(8):
-            angle = ray * (360 / 8) + time_offset * 50
-            ray_length = 80
-            ray_width = 15
-            
-            # Calculate ray position
-            end_x = sun_x + ray_length * math.cos(math.radians(angle))
-            end_y = sun_y + ray_length * math.sin(math.radians(angle))
-            
-            # Draw ray with animation
-            ray_alpha = abs(math.sin(time_offset + ray)) * 150 + 100
-            draw.line([(sun_x, sun_y), (end_x, end_y)], 
-                     fill=theme["sun"][:3] + (int(ray_alpha),), width=ray_width)
-    
-    elif "Ocean" in theme_name:
-        # Animated ocean waves
-        wave_height = 40
-        
-        for wave in range(5):
-            wave_y = height // 2 + wave * wave_height
-            
-            # Calculate wave animation
-            wave_offset = math.sin(time_offset * theme["animation"]["wave_speed"] + wave) * 50
-            wave_width = width + 100
-            
-            # Create wave shape
-            points = []
-            for x in range(0, wave_width, 20):
-                x_pos = x - wave_offset
-                wave_height_mod = math.sin(x * 0.02 + time_offset * 2 + wave) * 20
-                y_pos = wave_y + wave_height_mod
-                points.append((x_pos, y_pos))
-            
-            # Close wave shape
-            if points:
-                points.append((width, height))
-                points.append((0, height))
-                
-                # Draw wave with gradient effect
-                wave_color = theme["water_layers"][wave % len(theme["water_layers"])]
-                draw.polygon(points, fill=wave_color)
-            
-            # Animated foam on wave crests
-            foam_y = wave_y - 10
-            foam_width = 30
-            
-            for i in range(10):
-                foam_x = (i * 100 + time_offset * 50) % width
-                foam_wave = math.sin(time_offset * theme["animation"]["foam_speed"] + i) * 10
-                
-                draw.ellipse([
-                    foam_x - foam_width//2, foam_y + foam_wave - 5,
-                    foam_x + foam_width//2, foam_y + foam_wave + 5
-                ], fill=theme["foam"])
+            # Tree foliage (layered circles)
+            for j in range(3):
+                foliage_size = 40 - j * 10
+                foliage_y = tree_y - trunk_height - j * 25
+                draw.ellipse([tree_x-foliage_size, foliage_y-foliage_size,
+                            tree_x+foliage_size, foliage_y+foliage_size],
+                           fill=BRAND_COLORS["primary_green"][:3] + (200 - j*50,))
     
     return img
 
 # ============================================================================
-# MODERN KINETIC TYPOGRAPHY
+# TEXT ANIMATION FUNCTIONS
 # ============================================================================
-def draw_modern_text(draw, text, x, y, t, font_size, max_width, color, style="title"):
-    """Draw modern kinetic text with flat design"""
+def draw_typewriter_text(draw, text, font, x, y, max_width, t, duration=4):
+    """Draw text with typewriter animation."""
+    progress = min(1.0, t / duration)
+    visible_chars = int(len(text) * progress)
+    visible_text = text[:visible_chars]
     
-    if style == "title":
-        # Title with pulsing glow
-        pulse = math.sin(t * 3) * 3
-        current_size = int(font_size + pulse)
+    # Wrap text
+    words = visible_text.split()
+    lines = []
+    current_line = []
+    
+    for word in words:
+        test_line = ' '.join(current_line + [word])
+        bbox = draw.textbbox((0, 0), test_line, font=font)
+        text_width = bbox[2] - bbox[0]
         
-        try:
-            font = ImageFont.truetype("arialbd.ttf", current_size)
-        except:
-            font = ImageFont.load_default(current_size)
+        if text_width <= max_width:
+            current_line.append(word)
+        else:
+            if current_line:
+                lines.append(' '.join(current_line))
+            current_line = [word]
+    
+    if current_line:
+        lines.append(' '.join(current_line))
+    
+    # Draw lines
+    line_height = font.size * 1.4
+    current_y = y
+    
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line, font=font)
+        text_width = bbox[2] - bbox[0]
+        line_x = x + (max_width - text_width) // 2
         
-        # Floating effect
-        float_offset = math.sin(t * 2) * 2
+        draw.text((line_x, current_y), line, font=font, fill=BRAND_COLORS["white"])
+        current_y += line_height
+    
+    # Draw blinking cursor
+    if progress < 1.0 and int(t * 3) % 2 == 0:
+        if lines:
+            last_line = lines[-1]
+            bbox = draw.textbbox((0, 0), last_line, font=font)
+            cursor_x = x + (max_width - (bbox[2] - bbox[0])) // 2 + (bbox[2] - bbox[0]) + 5
+            cursor_y = current_y - line_height + 10
+            draw.line([(cursor_x, cursor_y), (cursor_x, cursor_y + line_height - 20)],
+                     fill=BRAND_COLORS["primary_green"], width=3)
+    
+    return current_y
+
+def draw_static_text(draw, text, font, x, y, max_width, color):
+    """Draw static wrapped text."""
+    words = text.split()
+    lines = []
+    current_line = []
+    
+    for word in words:
+        test_line = ' '.join(current_line + [word])
+        bbox = draw.textbbox((0, 0), test_line, font=font)
+        text_width = bbox[2] - bbox[0]
         
-        # Modern shadow (flat, offset)
-        shadow_offset = 4
-        draw.text((x + shadow_offset, y + shadow_offset + float_offset),
-                 text, font=font, fill=(0, 0, 0, 120))
+        if text_width <= max_width:
+            current_line.append(word)
+        else:
+            if current_line:
+                lines.append(' '.join(current_line))
+            current_line = [word]
+    
+    if current_line:
+        lines.append(' '.join(current_line))
+    
+    line_height = font.size * 1.4
+    current_y = y
+    
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line, font=font)
+        text_width = bbox[2] - bbox[0]
+        line_x = x + (max_width - text_width) // 2
         
-        # Main text with slight color variation
-        r, g, b, a = color
-        color_variation = int(math.sin(t * 4) * 20)
-        animated_color = (
-            min(255, max(0, r + color_variation)),
-            min(255, max(0, g + color_variation)),
-            min(255, max(0, b + color_variation)),
-            a
+        draw.text((line_x, current_y), line, font=font, fill=color)
+        current_y += line_height
+    
+    return current_y
+
+# ============================================================================
+# FONT MANAGEMENT
+# ============================================================================
+def load_font(size, bold=False):
+    """Load font with fallbacks."""
+    font_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/calibri.ttf"
+    ]
+    
+    if bold:
+        font_paths = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/System/Library/Fonts/Helvetica-Bold.ttc",
+            "C:/Windows/Fonts/arialbd.ttf",
+            "C:/Windows/Fonts/calibrib.ttf"
+        ]
+    
+    for font_path in font_paths:
+        if os.path.exists(font_path):
+            try:
+                return ImageFont.truetype(font_path, size)
+            except:
+                continue
+    
+    return ImageFont.load_default(size)
+
+# ============================================================================
+# MAIN COMPOSITION FUNCTION
+# ============================================================================
+def create_nature_design(width, height, theme_name, book, chapter, verse, 
+                        hook_text, t=0, is_video=False):
+    """Create complete nature design with scripture."""
+    theme = NATURE_THEMES[theme_name]
+    
+    # Create background
+    img = create_flat_background(width, height, theme, t)
+    draw = ImageDraw.Draw(img)
+    
+    # Get verse text
+    verse_text, reference = get_bible_verse(book, chapter, verse)
+    
+    # Content panel
+    panel_width = min(900, width - 100)
+    panel_height = 500
+    panel_x = (width - panel_width) // 2
+    panel_y = (height - panel_height) // 2 - 50
+    
+    # Semi-transparent panel background
+    panel_bg = Image.new("RGBA", (panel_width, panel_height), (0, 0, 0, 180))
+    img.paste(panel_bg, (panel_x, panel_y), panel_bg)
+    
+    # Panel border
+    draw.rounded_rectangle([panel_x-5, panel_y-5, 
+                           panel_x+panel_width+5, panel_y+panel_height+5],
+                          radius=10, outline=BRAND_COLORS["primary_green"], width=3)
+    
+    # Load fonts
+    hook_font = load_font(64, bold=True)
+    verse_font = load_font(48, bold=False)
+    ref_font = load_font(36, bold=True)
+    
+    # Draw hook/title
+    if hook_text:
+        hook_bbox = draw.textbbox((0, 0), hook_text, font=hook_font)
+        hook_width = hook_bbox[2] - hook_bbox[0]
+        hook_x = panel_x + (panel_width - hook_width) // 2
+        hook_y = panel_y - 100
+        
+        # Hook background
+        draw.rectangle([hook_x-20, hook_y-15, 
+                       hook_x+hook_width+20, hook_y+hook_font.size+15],
+                      fill=BRAND_COLORS["primary_green"])
+        
+        # Hook text
+        draw.text((hook_x, hook_y), hook_text, font=hook_font, 
+                 fill=BRAND_COLORS["white"])
+    
+    # Draw verse text
+    text_max_width = panel_width - 80
+    text_start_y = panel_y + 60
+    
+    if is_video:
+        # Typewriter animation
+        final_y = draw_typewriter_text(
+            draw, verse_text, verse_font, 
+            panel_x + 40, text_start_y, text_max_width, t
         )
-        
-        draw.text((x, y + float_offset), text, font=font, fill=animated_color)
-        
-        return current_size
+    else:
+        # Static text
+        final_y = draw_static_text(
+            draw, verse_text, verse_font,
+            panel_x + 40, text_start_y, text_max_width,
+            theme["text_color"]
+        )
     
-    elif style == "verse":
-        # Typewriter reveal with modern fade
-        font = ImageFont.load_default(font_size)
-        
-        # Animated reveal
-        duration = 5
-        progress = min(1.0, t / duration)
-        visible_chars = int(len(text) * progress)
-        
-        # Split into words for clean wrap
-        words = text.split()
-        lines = []
-        current_line = []
-        
-        # Build lines based on visible words
-        visible_words = int(len(words) * progress)
-        for i in range(visible_words):
-            word = words[i]
-            test_line = ' '.join(current_line + [word])
-            bbox = draw.textbbox((0, 0), test_line, font=font)
-            
-            if bbox[2] - bbox[0] <= max_width:
-                current_line.append(word)
-            else:
-                if current_line:
-                    lines.append(' '.join(current_line))
-                current_line = [word]
-        
-        if current_line:
-            lines.append(' '.join(current_line))
-        
-        # Draw lines with fade effect
-        line_height = font_size * 1.4
-        current_y = y
-        
-        for i, line in enumerate(lines):
-            # Line position animation
-            line_offset = math.sin(t * 2 + i) * 2
-            
-            bbox = draw.textbbox((0, 0), line, font=font)
-            text_width = bbox[2] - bbox[0]
-            line_x = x + (max_width - text_width) // 2
-            
-            # Progressive fade for each line
-            line_progress = min(1.0, (progress - i * 0.3) * 2)
-            text_alpha = int(255 * line_progress)
-            
-            # Flat shadow
-            draw.text((line_x + 3, current_y + line_offset + 3), line,
-                     font=font, fill=(0, 0, 0, text_alpha//2))
-            
-            # Main text
-            draw.text((line_x, current_y + line_offset), line,
-                     font=font, fill=color[:3] + (text_alpha,))
-            
-            current_y += line_height
-        
-        return current_y
+    # Draw reference
+    ref_bbox = draw.textbbox((0, 0), reference, font=ref_font)
+    ref_width = ref_bbox[2] - ref_bbox[0]
+    ref_x = panel_x + panel_width - ref_width - 40
+    ref_y = final_y + 40
+    
+    if is_video:
+        # Fade in reference
+        ref_alpha = int(255 * max(0, min(1.0, (t - 3.5) / 1)))
+        if ref_alpha > 0:
+            ref_color = BRAND_COLORS["primary_green_light"][:3] + (ref_alpha,)
+            draw.text((ref_x, ref_y), reference, font=ref_font, fill=ref_color)
+    else:
+        # Static reference
+        ref_bg_width = ref_width + 30
+        ref_bg_height = ref_font.size + 20
+        draw.rounded_rectangle([ref_x-15, ref_y-10,
+                               ref_x+ref_width+15, ref_y+ref_bg_height],
+                              radius=8, fill=BRAND_COLORS["primary_green"])
+        draw.text((ref_x, ref_y), reference, font=ref_font, 
+                 fill=BRAND_COLORS["white"])
+    
+    # Brand watermark
+    watermark_font = load_font(28, bold=True)
+    draw.text((width - 200, 30), "STILL MIND", font=watermark_font,
+             fill=BRAND_COLORS["white"][:3] + (150,))
+    
+    return img
 
 # ============================================================================
 # VIDEO GENERATION
 # ============================================================================
-def create_nature_video(width, height, theme, text, duration=8):
-    """Create smooth animated video"""
-    fps = 30
+def create_nature_video(width, height, theme_name, book, chapter, verse, hook_text):
+    """Create animated video."""
+    duration = 6
+    fps = 24
     
     def make_frame(t):
-        img = Image.new("RGBA", (width, height), (255, 255, 255, 0))
-        
-        # Draw animated background
-        bg = create_flat_background(width, height, theme, t)
-        img.paste(bg, (0, 0))
-        
-        # Add text overlay
-        draw = ImageDraw.Draw(img)
-        
-        # Draw title
-        draw_modern_text(draw, "STILL MIND", width//2 - 150, 100, t,
-                        font_size=72, max_width=300,
-                        color=COLORS["text_light"], style="title")
-        
-        # Draw verse text
-        draw_modern_text(draw, text, 100, height//2 - 100, t,
-                        font_size=48, max_width=width - 200,
-                        color=COLORS["text_light"], style="verse")
-        
-        # Add simple watermark
-        watermark_font = ImageFont.load_default(24)
-        draw.text((width - 150, height - 40), "nature.motion",
-                 font=watermark_font, fill=(255, 255, 255, 180))
-        
+        img = create_nature_design(
+            width, height, theme_name, book, chapter, verse,
+            hook_text, t, True
+        )
         return np.array(img.convert("RGB"))
     
-    # Create video clip
     clip = VideoClip(make_frame, duration=duration)
     clip = clip.set_fps(fps)
     
-    # Export
+    # Create temporary file
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
     temp_path = temp_file.name
     
@@ -480,9 +664,7 @@ def create_nature_video(width, height, theme, text, duration=8):
             codec="libx264",
             audio_codec="aac",
             verbose=False,
-            logger=None,
-            preset='ultrafast',
-            ffmpeg_params=['-crf', '28']
+            logger=None
         )
         
         with open(temp_path, 'rb') as f:
@@ -494,163 +676,224 @@ def create_nature_video(width, height, theme, text, duration=8):
             os.unlink(temp_path)
 
 # ============================================================================
-# MAIN APP
+# STREAMLIT UI
 # ============================================================================
-# Title with minimal styling
-st.markdown("""
-<div style="text-align: center; padding: 1rem 0;">
-    <h1 style="margin: 0; color: #298063;">Nature Motion Studio</h1>
-    <p style="color: #666; margin: 0.5rem 0;">Animated Flat Design Backgrounds</p>
-</div>
-""", unsafe_allow_html=True)
+st.title("🌿 Still Mind: Flat Nature Studio")
+st.markdown("### Create beautiful scripture graphics with flat nature designs")
 
-# Simple two-column layout
-col1, col2 = st.columns([1, 2], gap="large")
+# Sidebar
+with st.sidebar:
+    st.header("🎨 Design Settings")
+    
+    # Theme selection
+    theme_option = st.selectbox(
+        "Nature Theme",
+        list(NATURE_THEMES.keys()),
+        help="Choose a nature theme for your design"
+    )
+    
+    # Size selection
+    size_option = st.selectbox(
+        "Output Size",
+        ["Instagram (1080x1080)", "TikTok (1080x1920)", "Stories (1080x1350)"]
+    )
+    
+    if "1920" in size_option:
+        WIDTH, HEIGHT = 1080, 1920
+    elif "1350" in size_option:
+        WIDTH, HEIGHT = 1080, 1350
+    else:
+        WIDTH, HEIGHT = 1080, 1080
+    
+    st.divider()
+    
+    st.header("📖 Scripture")
+    
+    # Bible book selection
+    bible_books = ["Psalm", "Matthew", "John", "Isaiah", "Romans", 
+                   "Philippians", "James", "Proverbs", "Ecclesiastes",
+                   "Genesis", "Exodus", "Deuteronomy", "Ephesians"]
+    
+    book = st.selectbox("Book", bible_books, index=0)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        chapter = st.number_input("Chapter", 1, 150, 46, 
+                                 help="Bible chapter number")
+    with col2:
+        verse = st.number_input("Verse", 1, 176, 10, 
+                               help="Bible verse number")
+    
+    # Get verse text for preview
+    verse_text, reference = get_bible_verse(book, chapter, verse)
+    
+    st.write(f"**Preview:** {verse_text[:80]}...")
+    
+    st.divider()
+    
+    st.header("🪄 AI Tools")
+    
+    # Generate hook with AI
+    if st.button("🤖 Generate Hook with AI", use_container_width=True):
+        with st.spinner("Generating creative hook..."):
+            hook_text = generate_hook_with_ai(verse_text, theme_option)
+            st.session_state.hook_text = hook_text
+            st.success(f"Generated: {hook_text}")
+    
+    # Manual hook input
+    hook_text = st.text_input(
+        "Hook/Title",
+        value=st.session_state.get("hook_text", "BE STILL"),
+        help="Short title for your graphic"
+    ).upper()
+    
+    st.divider()
+    
+    st.header("⏱️ Animation Preview")
+    time_slider = st.slider(
+        "Time",
+        0.0, 6.0, 0.0, 0.1,
+        help="Drag to preview animation at different times"
+    )
+
+# Main content
+col1, col2 = st.columns([2, 1])
 
 with col1:
-    # Minimal controls
-    st.markdown("### Settings")
+    # Preview section
+    st.subheader("🎨 Live Preview")
     
-    # Theme selection with preview
-    theme_option = st.selectbox(
-        "🌿 Theme",
-        list(NATURE_THEMES.keys()),
-        index=0
-    )
+    with st.spinner("Creating design..."):
+        preview_img = create_nature_design(
+            WIDTH, HEIGHT, theme_option, book, chapter, verse,
+            hook_text, time_slider, False
+        )
     
-    # Display theme preview
-    theme = NATURE_THEMES[theme_option]
-    preview_size = 200
-    
-    # Create mini preview
-    preview_img = create_flat_background(preview_size, preview_size//2, theme_option, 0)
-    st.image(preview_img, caption=theme_option)
-    
-    # Text input
-    st.markdown("---")
-    st.markdown("### Text")
-    
-    text_input = st.text_area(
-        "Enter your text",
-        value="Be still and know that I am God",
-        height=100
-    )
-    
-    # Animation speed
-    speed = st.slider("Animation Speed", 0.5, 2.0, 1.0, 0.1)
-    
-    # Resolution
-    res_option = st.selectbox(
-        "Resolution",
-        ["1080x1920 (Vertical)", "1920x1080 (Horizontal)", "1080x1080 (Square)"]
-    )
+    # FIXED: Removed use_container_width parameter
+    st.image(preview_img)
     
     # Action buttons
-    st.markdown("---")
-    
     col_btn1, col_btn2 = st.columns(2)
     
     with col_btn1:
-        if st.button("🎬 Create Video", type="primary", use_container_width=True):
-            st.session_state.create_video = True
+        # Download PNG
+        img_buffer = io.BytesIO()
+        preview_img.save(img_buffer, format='PNG', optimize=True, quality=95)
+        
+        st.download_button(
+            label="📥 Download PNG",
+            data=img_buffer.getvalue(),
+            file_name=f"still_mind_{book}_{chapter}_{verse}.png",
+            mime="image/png",
+            use_container_width=True
+        )
     
     with col_btn2:
-        if st.button("🔄 Live Preview", use_container_width=True):
-            st.session_state.live_preview = not st.session_state.get("live_preview", False)
+        # Generate video
+        if st.button("🎬 Create Video (6s)", use_container_width=True):
+            with st.spinner("Creating animated video..."):
+                video_data = create_nature_video(
+                    WIDTH, HEIGHT, theme_option, book, chapter, verse, hook_text
+                )
+                
+                if video_data:
+                    st.video(video_data)
+                    
+                    # Video download button
+                    st.download_button(
+                        label="📥 Download MP4",
+                        data=video_data,
+                        file_name=f"still_mind_{book}_{chapter}_{verse}.mp4",
+                        mime="video/mp4",
+                        use_container_width=True
+                    )
 
 with col2:
-    # Main preview area
-    st.markdown("### Preview")
+    # Info panel
+    st.subheader("ℹ️ Design Info")
     
-    # Get dimensions
-    if "1080x1920" in res_option:
-        width, height = 540, 960  # Half size for preview
-    elif "1920x1080" in res_option:
-        width, height = 960, 540
-    else:
-        width, height = 540, 540
+    st.write("**Theme:**")
+    st.success(theme_option)
     
-    # Create preview placeholder
-    preview_placeholder = st.empty()
+    st.write("**Verse:**")
+    st.info(f"{book} {chapter}:{verse}")
     
-    # Live preview animation
-    if st.session_state.get("live_preview", False):
-        for i in range(100):
-            t = i * 0.1 * speed
-            preview_img = create_flat_background(width, height, theme_option, t)
-            
-            # Add text overlay
-            overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-            draw = ImageDraw.Draw(overlay)
-            
-            draw_modern_text(draw, "STILL MIND", width//2 - 150, 50, t,
-                            font_size=48, max_width=300,
-                            color=COLORS["text_light"], style="title")
-            
-            draw_modern_text(draw, text_input, 50, height//2 - 50, t,
-                            font_size=32, max_width=width - 100,
-                            color=COLORS["text_light"], style="verse")
-            
-            # Combine
-            preview_img = Image.alpha_composite(preview_img, overlay)
-            
-            preview_placeholder.image(preview_img)
-            time.sleep(0.1)
-    else:
-        # Static preview
-        preview_img = create_flat_background(width, height, theme_option, 0)
-        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        
-        draw_modern_text(draw, "STILL MIND", width//2 - 150, 50, 0,
-                        font_size=48, max_width=300,
-                        color=COLORS["text_light"], style="title")
-        
-        draw_modern_text(draw, text_input, 50, height//2 - 50, 0,
-                        font_size=32, max_width=width - 100,
-                        color=COLORS["text_light"], style="verse")
-        
-        preview_img = Image.alpha_composite(preview_img, overlay)
-        preview_placeholder.image(preview_img)
+    st.write("**Size:**")
+    st.metric("Dimensions", f"{WIDTH} × {HEIGHT}")
     
-    # Video creation
-    if st.session_state.get("create_video", False):
-        with st.spinner("🎬 Creating animated video..."):
-            # Get full resolution
-            if "1080x1920" in res_option:
-                vid_width, vid_height = 1080, 1920
-            elif "1920x1080" in res_option:
-                vid_width, vid_height = 1920, 1080
-            else:
-                vid_width, vid_height = 1080, 1080
-            
-            video_data = create_nature_video(vid_width, vid_height, theme_option, text_input)
-            
-            if video_data:
-                st.video(video_data)
-                
-                # Download button
-                st.download_button(
-                    label="📥 Download MP4",
-                    data=video_data,
-                    file_name=f"nature_motion_{theme_option.lower().replace(' ', '_')}.mp4",
-                    mime="video/mp4",
-                    use_container_width=True
-                )
-        
-        st.session_state.create_video = False
+    st.divider()
+    
+    # Social media section
+    st.subheader("📱 Social Media")
+    
+    # Generate caption with AI
+    if st.button("🤖 Generate Social Caption", use_container_width=True):
+        with st.spinner("Creating optimized caption..."):
+            caption = generate_social_caption_with_ai(
+                verse_text, reference, hook_text, theme_option
+            )
+            st.session_state.caption = caption
+            st.success("Caption generated!")
+    
+    # Display caption
+    caption = st.session_state.get("caption", "")
+    if not caption:
+        # Default caption
+        caption = f"""{hook_text}
 
-# Simple footer
-st.markdown("---")
-st.markdown(
-    "<div style='text-align: center; color: #666; font-size: 0.9rem;'>"
-    "Nature Motion Studio • Flat Design Animations • Made with Streamlit"
-    "</div>",
-    unsafe_allow_html=True
-)
+{verse_text[:100]}...
 
-# Initialize session state
-if "live_preview" not in st.session_state:
-    st.session_state.live_preview = False
-if "create_video" not in st.session_state:
-    st.session_state.create_video = False
+📖 {reference}
+
+#StillMind #Scripture #Faith #{theme_option.replace(' ', '')}"""
+        st.session_state.caption = caption
+    
+    st.text_area("Social Media Caption", caption, height=200)
+    
+    if st.button("📋 Copy Caption", use_container_width=True):
+        st.code(caption)
+        st.success("Copied to clipboard!")
+    
+    st.divider()
+    
+    # Color palette preview
+    st.subheader("🎨 Color Palette")
+    
+    colors = BRAND_COLORS
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Greens:**")
+        st.markdown(f'<div style="background-color:rgb{colors["primary_green"][:3]}; height:30px; border-radius:5px;"></div>', 
+                   unsafe_allow_html=True)
+        st.markdown(f'<div style="background-color:rgb{colors["primary_green_light"][:3]}; height:30px; border-radius:5px; margin-top:5px;"></div>', 
+                   unsafe_allow_html=True)
+        st.markdown(f'<div style="background-color:rgb{colors["primary_green_dark"][:3]}; height:30px; border-radius:5px; margin-top:5px;"></div>', 
+                   unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("**Blues:**")
+        st.markdown(f'<div style="background-color:rgb{colors["primary_navy"][:3]}; height:30px; border-radius:5px;"></div>', 
+                   unsafe_allow_html=True)
+        st.markdown(f'<div style="background-color:rgb{colors["primary_navy_light"][:3]}; height:30px; border-radius:5px; margin-top:5px;"></div>', 
+                   unsafe_allow_html=True)
+        st.markdown(f'<div style="background-color:rgb{colors["primary_navy_dark"][:3]}; height:30px; border-radius:5px; margin-top:5px;"></div>', 
+                   unsafe_allow_html=True)
+
+# Footer
+st.divider()
+st.markdown("""
+<div style='text-align: center; color: #4CAF50; font-size: 0.9rem;'>
+    <p>🌿 Still Mind Nature Studio • Flat Design • Brand Colors: Green, Navy Blue, White, Grey</p>
+    <p>Bible API Integration • Groq AI • Typewriter Animation • Social Media Ready</p>
+</div>
+""", unsafe_allow_html=True)
+
+# Cleanup temporary files
+for file in os.listdir("."):
+    if file.startswith("temp_") and file.endswith(".mp4"):
+        try:
+            if time.time() - os.path.getctime(file) > 300:  # 5 minutes old
+                os.remove(file)
+        except:
+            pass
