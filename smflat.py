@@ -1,8 +1,9 @@
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
-import io, os, math
+import io, os, math, json
 import numpy as np
 from moviepy.editor import VideoClip
+import requests
 
 st.set_page_config(page_title="Still Mind", page_icon="✨", layout="centered")
 
@@ -196,6 +197,52 @@ def create_video(w, h, theme, book, chapter, verse, verse_text):
         if os.path.exists(temp):
             os.unlink(temp)
 
+def generate_ready_post(book, chapter, verse, verse_text):
+    """Generate ready-to-use social media post using Groq AI."""
+    try:
+        api_key = st.secrets.get("groq_key", "")
+        if not api_key:
+            return None, "Groq API key not found in secrets"
+        
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        prompt = f"""Create a compelling social media post for this Bible verse:
+
+{book} {chapter}:{verse}
+"{verse_text}"
+
+Write:
+1. A catchy hook/caption (2-3 sentences max)
+2. 3-5 relevant hashtags
+
+Keep it inspirational, relatable, and engaging. Make people want to share it."""
+
+        data = {
+            "model": "mixtral-8x7b-32768",
+            "messages": [
+                {"role": "system", "content": "You are a social media expert specializing in faith-based content that goes viral."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.7,
+            "max_tokens": 500
+        }
+        
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        
+        if response.status_code == 200:
+            result = response.json()
+            content = result["choices"][0]["message"]["content"]
+            return content, None
+        else:
+            return None, f"API Error: {response.status_code}"
+            
+    except Exception as e:
+        return None, str(e)
+
 # UI
 st.title("Still Mind")
 
@@ -224,7 +271,11 @@ with col_a:
 
 w, h = (1080, 1080) if "Post" in size else (1080, 1920) if "Story" in size else (1920, 1080)
 
-with col_b:
+st.divider()
+
+col_gen1, col_gen2, col_gen3 = st.columns(3)
+
+with col_gen1:
     if st.button("Generate Image", type="primary"):
         with st.spinner("Generating..."):
             img = create_flat_design(w, h, theme, book, chapter, verse, verse_text)
@@ -237,7 +288,7 @@ with col_b:
             st.download_button("Download PNG", buf.getvalue(), 
                              f"{book}_{chapter}_{verse}.png", "image/png")
 
-with col_c:
+with col_gen2:
     if st.button("Generate Video"):
         with st.spinner("Rendering..."):
             video = create_video(w, h, theme, book, chapter, verse, verse_text)
@@ -246,3 +297,14 @@ with col_c:
             
             st.download_button("Download MP4", video, 
                              f"{book}_{chapter}_{verse}.mp4", "video/mp4")
+
+with col_gen3:
+    if st.button("Ready Post (AI)"):
+        with st.spinner("Creating post..."):
+            post, error = generate_ready_post(book, chapter, verse, verse_text)
+            
+            if post:
+                st.success("Post ready!")
+                st.text_area("Copy this:", post, height=200)
+            else:
+                st.error(f"Error: {error}")
