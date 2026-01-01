@@ -5,452 +5,456 @@ import numpy as np
 from moviepy.editor import VideoClip
 
 # ============================================================================
-# FLAT DESIGN THEME SYSTEM
+# PREMIUM MODERN DESIGN SYSTEM
 # ============================================================================
 st.set_page_config(
-    page_title="Still Mind Flat",
-    page_icon="🟩",
+    page_title="Still Mind Pro",
+    page_icon="✨",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# Premium themes with modern color psychology
 THEMES = {
-    "Emerald Forest": {
-        "primary": (46, 204, 113, 255),    # Flat Emerald
-        "primary_dark": (39, 174, 96, 255),
-        "primary_light": (111, 226, 154, 255),
-        "background": (26, 36, 48, 255),   # Deep Navy
-        "surface": (52, 73, 94, 255),      # Slate Blue
-        "text": (236, 240, 241, 255),      # Off-White
-        "accent": (255, 195, 0, 255),      # Yellow accent
-        "border": 6                        # Thick border width
+    "Nordic Calm": {
+        "primary": (88, 86, 214, 255),      # Vibrant Purple
+        "secondary": (45, 212, 191, 255),   # Turquoise
+        "accent": (255, 107, 107, 255),     # Coral
+        "bg_gradient_top": (15, 23, 42, 255),    # Deep Navy
+        "bg_gradient_bottom": (30, 41, 59, 255),  # Slate
+        "surface": (51, 65, 85, 255),       # Card BG
+        "text": (248, 250, 252, 255),       # Off-white
+        "text_secondary": (203, 213, 225, 255),
+        "glow": (139, 92, 246, 100)         # Purple glow
     },
-    "Sunset Minimal": {
-        "primary": (255, 159, 67, 255),    # Orange
-        "primary_dark": (230, 126, 34, 255),
-        "primary_light": (255, 189, 89, 255),
-        "background": (41, 128, 185, 255), # Blue
-        "surface": (52, 152, 219, 255),
-        "text": (245, 246, 250, 255),
-        "accent": (255, 121, 121, 255),    # Coral
-        "border": 5
+    "Golden Hour": {
+        "primary": (251, 191, 36, 255),     # Amber
+        "secondary": (249, 115, 22, 255),   # Orange
+        "accent": (236, 72, 153, 255),      # Pink
+        "bg_gradient_top": (17, 24, 39, 255),
+        "bg_gradient_bottom": (31, 41, 55, 255),
+        "surface": (55, 65, 81, 255),
+        "text": (254, 252, 232, 255),
+        "text_secondary": (253, 230, 138, 255),
+        "glow": (251, 191, 36, 100)
     },
-    "Midnight Purple": {
-        "primary": (155, 89, 182, 255),    # Purple
-        "primary_dark": (142, 68, 173, 255),
-        "primary_light": (195, 155, 211, 255),
-        "background": (44, 62, 80, 255),   # Dark Blue
-        "surface": (52, 73, 94, 255),
-        "text": (236, 240, 241, 255),
-        "accent": (26, 188, 156, 255),     # Teal
-        "border": 4
+    "Ocean Deep": {
+        "primary": (34, 211, 238, 255),     # Cyan
+        "secondary": (59, 130, 246, 255),   # Blue
+        "accent": (168, 85, 247, 255),      # Purple
+        "bg_gradient_top": (3, 7, 18, 255),
+        "bg_gradient_bottom": (15, 23, 42, 255),
+        "surface": (30, 41, 59, 255),
+        "text": (240, 249, 255, 255),
+        "text_secondary": (186, 230, 253, 255),
+        "glow": (34, 211, 238, 100)
+    },
+    "Forest Zen": {
+        "primary": (52, 211, 153, 255),     # Emerald
+        "secondary": (134, 239, 172, 255),  # Green
+        "accent": (251, 191, 36, 255),      # Gold
+        "bg_gradient_top": (6, 20, 15, 255),
+        "bg_gradient_bottom": (20, 40, 30, 255),
+        "surface": (34, 60, 50, 255),
+        "text": (236, 253, 245, 255),
+        "text_secondary": (167, 243, 208, 255),
+        "glow": (52, 211, 153, 100)
     }
 }
 
 SIZES = {
-    "Mobile (1080x1920)": (1080, 1920),
-    "Square (1080x1080)": (1080, 1080),
-    "Desktop (1920x1080)": (1920, 1080),
-    "Stories (1080x1350)": (1080, 1350)
+    "Instagram Post (1080x1080)": (1080, 1080),
+    "Instagram Story (1080x1920)": (1080, 1920),
+    "YouTube Thumbnail (1920x1080)": (1920, 1080),
+    "TikTok (1080x1920)": (1080, 1920),
+    "Twitter Post (1200x675)": (1200, 675),
+    "Facebook Post (1200x630)": (1200, 630)
 }
 
 # ============================================================================
-# GEOMETRIC FLAT DESIGN ELEMENTS
+# ADVANCED VISUAL EFFECTS
 # ============================================================================
-def draw_geometric_sun(draw, w, h, t, colors):
-    """Draw a flat geometric sun with rays."""
-    sun_size = 80
-    sun_x = w // 2
-    sun_y = h * 0.25
+def create_gradient_background(w, h, colors):
+    """Create smooth gradient with noise texture."""
+    img = Image.new("RGBA", (w, h))
+    draw = ImageDraw.Draw(img)
     
-    # Sun body (circle)
-    draw.ellipse([sun_x - sun_size, sun_y - sun_size, 
-                  sun_x + sun_size, sun_y + sun_size], 
-                 fill=colors["primary_light"], 
-                 outline=colors["text"], 
-                 width=colors["border"])
+    # Diagonal gradient
+    for y in range(h):
+        ratio = y / h
+        # Smooth color interpolation
+        r = int(colors["bg_gradient_top"][0] * (1-ratio) + colors["bg_gradient_bottom"][0] * ratio)
+        g = int(colors["bg_gradient_top"][1] * (1-ratio) + colors["bg_gradient_bottom"][1] * ratio)
+        b = int(colors["bg_gradient_top"][2] * (1-ratio) + colors["bg_gradient_bottom"][2] * ratio)
+        draw.rectangle([(0, y), (w, y+1)], fill=(r, g, b, 255))
     
-    # Sun rays (geometric lines)
-    ray_count = 8
-    ray_length = 40
+    # Add subtle noise texture
+    noise = np.random.normal(0, 5, (h, w, 4))
+    noise[:,:,3] = 0  # Keep alpha channel
+    noise_img = Image.fromarray(noise.astype('uint8'), 'RGBA')
+    img = Image.alpha_composite(img, noise_img)
     
-    for i in range(ray_count):
-        angle = (i / ray_count) * (2 * math.pi) + t * 0.5
-        start_x = sun_x + (sun_size + 5) * math.cos(angle)
-        start_y = sun_y + (sun_size + 5) * math.sin(angle)
-        end_x = start_x + ray_length * math.cos(angle)
-        end_y = start_y + ray_length * math.sin(angle)
-        
-        draw.line([(start_x, start_y), (end_x, end_y)], 
-                  fill=colors["primary"], 
-                  width=colors["border"])
+    return img
 
-def draw_geometric_mountains(draw, w, h, colors):
-    """Draw flat triangular mountains."""
-    # Left mountain
-    left_mountain = [
-        (w * 0.2, h),
-        (w * 0.4, h * 0.5),
-        (w * 0.6, h)
-    ]
-    draw.polygon(left_mountain, 
-                 fill=colors["surface"], 
-                 outline=colors["text"], 
-                 width=colors["border"])
-    
-    # Right mountain
-    right_mountain = [
-        (w * 0.5, h),
-        (w * 0.7, h * 0.4),
-        (w * 0.9, h)
-    ]
-    draw.polygon(right_mountain, 
-                 fill=colors["surface"], 
-                 outline=colors["text"], 
-                 width=colors["border"])
+def draw_glowing_orbs(draw, w, h, t, colors, count=8):
+    """Draw animated glowing orbs with motion blur effect."""
+    for i in range(count):
+        # Parametric circular motion
+        angle = (t * 0.3 + i * (2 * math.pi / count)) % (2 * math.pi)
+        radius_orbit = min(w, h) * 0.35
+        
+        cx = w/2 + radius_orbit * math.cos(angle) * 0.8
+        cy = h/2 + radius_orbit * math.sin(angle) * 0.6
+        
+        # Size variation
+        size = 40 + 30 * math.sin(t * 2 + i)
+        
+        # Multi-layer glow effect
+        for layer in range(5):
+            layer_size = size * (1 + layer * 0.4)
+            alpha = int(40 / (layer + 1))
+            
+            color = colors["primary"] if i % 2 == 0 else colors["secondary"]
+            glow_color = color[:3] + (alpha,)
+            
+            draw.ellipse([cx - layer_size, cy - layer_size,
+                         cx + layer_size, cy + layer_size],
+                        fill=glow_color)
 
-def draw_geometric_trees(draw, w, h, t, colors):
-    """Draw flat geometric trees."""
-    tree_colors = [
-        colors["primary"],
-        colors["primary_dark"],
-        colors["primary_light"]
-    ]
+def draw_geometric_grid(draw, w, h, t, colors):
+    """Draw animated geometric grid with depth."""
+    grid_size = 60
+    line_width = 2
     
-    # Tree positions
-    tree_positions = [
-        (w * 0.2, h - 100),
-        (w * 0.35, h - 80),
-        (w * 0.5, h - 120),
-        (w * 0.65, h - 90),
-        (w * 0.8, h - 110)
-    ]
+    # Perspective grid
+    for x in range(0, w, grid_size):
+        # Animate opacity based on time
+        alpha = int(30 + 20 * math.sin(t + x/100))
+        color = colors["text_secondary"][:3] + (alpha,)
+        
+        # Vertical lines with wave
+        offset = math.sin(t * 2 + x/100) * 10
+        draw.line([(x, 0), (x + offset, h)], fill=color, width=line_width)
     
-    for i, (x, y) in enumerate(tree_positions):
-        # Tree trunk
-        trunk_height = 60 + i * 10
-        trunk_width = 12
+    for y in range(0, h, grid_size):
+        alpha = int(30 + 20 * math.cos(t + y/100))
+        color = colors["text_secondary"][:3] + (alpha,)
         
-        draw.rectangle([x - trunk_width//2, y - trunk_height, 
-                       x + trunk_width//2, y], 
-                      fill=colors["surface"], 
-                      outline=colors["text"], 
-                      width=colors["border"]//2)
-        
-        # Tree crown (triangle for flat design)
-        crown_size = 80 + i * 5
-        crown = [
-            (x, y - trunk_height - crown_size),
-            (x - crown_size//2, y - trunk_height),
-            (x + crown_size//2, y - trunk_height)
-        ]
-        
-        tree_color = tree_colors[i % len(tree_colors)]
-        draw.polygon(crown, 
-                    fill=tree_color, 
-                    outline=colors["text"], 
-                    width=colors["border"])
+        # Horizontal lines with wave
+        offset = math.cos(t * 2 + y/100) * 10
+        draw.line([(0, y), (w, y + offset)], fill=color, width=line_width)
 
-def draw_geometric_birds(draw, w, h, t, colors):
-    """Draw flat geometric bird shapes (V-shapes)."""
-    bird_count = 5
-    
-    for i in range(bird_count):
-        # Bird position with animation
-        base_x = (t * 200 + i * 150) % (w + 200) - 100
-        base_y = h * 0.3 + math.sin(t * 2 + i) * 30
+def draw_floating_particles(draw, w, h, t, colors, count=30):
+    """Draw floating particle system."""
+    for i in range(count):
+        # Unique motion path for each particle
+        seed = i * 123.456
+        x = (w * 0.2 + (t * 50 + seed * 10) % (w * 0.6))
+        y = (h * 0.1 + ((t * 30 + seed * 5) % (h * 0.8)))
         
-        # Wing flap animation
-        flap = math.sin(t * 10 + i) * 15
+        # Add sine wave motion
+        x += math.sin(t * 3 + i) * 20
+        y += math.cos(t * 2 + i) * 15
         
-        # Draw flat V-shaped bird
-        wing_length = 20 + i * 3
+        # Varying sizes
+        size = 3 + (i % 5)
         
-        # Left wing
-        draw.line([(base_x, base_y), 
-                  (base_x - wing_length, base_y - 15 + flap)], 
-                 fill=colors["text"], 
-                 width=colors["border"])
+        # Pulsing alpha
+        alpha = int(100 + 100 * math.sin(t * 4 + i))
+        color = colors["accent"][:3] + (alpha,)
         
-        # Right wing
-        draw.line([(base_x, base_y), 
-                  (base_x + wing_length, base_y - 15 + flap)], 
-                 fill=colors["text"], 
-                 width=colors["border"])
+        # Draw particle with glow
+        draw.ellipse([x-size*2, y-size*2, x+size*2, y+size*2],
+                    fill=colors["accent"][:3] + (50,))
+        draw.ellipse([x-size, y-size, x+size, y+size], fill=color)
 
-def draw_geometric_river(draw, w, h, t, colors):
-    """Draw a flat geometric river."""
-    river_points = [
-        (w * 0.3, h * 0.7),
-        (w * 0.4, h * 0.75),
-        (w * 0.5, h * 0.7),
-        (w * 0.6, h * 0.75),
-        (w * 0.7, h * 0.7),
-        (w * 0.7, h),
-        (w * 0.3, h)
-    ]
+def draw_premium_panel(draw, w, h, colors):
+    """Draw glassmorphism-style panel with shadows."""
+    panel_w = int(w * 0.75)
+    panel_h = int(h * 0.55)
+    px = (w - panel_w) // 2
+    py = (h - panel_h) // 2 - 30
     
-    # River body
-    draw.polygon(river_points, 
-                fill=colors["surface"], 
-                outline=colors["text"], 
-                width=colors["border"])
+    corner_radius = 30
     
-    # River waves (geometric lines)
-    wave_count = 8
-    for i in range(wave_count):
-        wave_x = w * 0.3 + (i * (w * 0.4) / wave_count)
-        wave_y = h * 0.85 + math.sin(t * 3 + i) * 10
+    # Shadow layers
+    for offset in range(20, 0, -4):
+        shadow_alpha = int(10 * (20 - offset) / 20)
+        shadow_color = (0, 0, 0, shadow_alpha)
         
-        wave_length = 40
-        draw.line([(wave_x, wave_y), 
-                  (wave_x + wave_length, wave_y)], 
-                 fill=colors["primary_light"], 
-                 width=colors["border"]//2)
-
-def draw_flat_ui_panel(draw, w, h, colors):
-    """Draw a flat UI panel for text."""
-    panel_width = 900
-    panel_height = 550
-    panel_x = (w - panel_width) // 2
-    panel_y = (h - panel_height) // 2 - 50
+        draw.rounded_rectangle(
+            [px + offset//2, py + offset//2, 
+             px + panel_w + offset//2, py + panel_h + offset//2],
+            radius=corner_radius,
+            fill=shadow_color
+        )
     
-    # Main panel
-    draw.rectangle([panel_x, panel_y, 
-                   panel_x + panel_width, panel_y + panel_height], 
-                  fill=colors["background"], 
-                  outline=colors["text"], 
-                  width=colors["border"])
+    # Glassmorphism panel
+    panel_color = colors["surface"][:3] + (240,)
+    draw.rounded_rectangle(
+        [px, py, px + panel_w, py + panel_h],
+        radius=corner_radius,
+        fill=panel_color
+    )
     
-    # Accent bar on left
-    accent_width = 20
-    draw.rectangle([panel_x, panel_y, 
-                   panel_x + accent_width, panel_y + panel_height], 
-                  fill=colors["primary"])
+    # Gradient border
+    border_width = 3
+    for i in range(border_width):
+        alpha = int(255 * (border_width - i) / border_width)
+        border_color = colors["primary"][:3] + (alpha,)
+        
+        draw.rounded_rectangle(
+            [px + i, py + i, px + panel_w - i, py + panel_h - i],
+            radius=corner_radius,
+            outline=border_color,
+            width=1
+        )
     
-    return panel_x, panel_y, panel_width, panel_height
-
-def draw_geometric_elements(draw, w, h, t, colors):
-    """Draw all geometric elements in flat design."""
-    # Draw background elements
-    draw_geometric_mountains(draw, w, h, colors)
-    draw_geometric_sun(draw, w, h, t, colors)
-    draw_geometric_river(draw, w, h, t, colors)
-    draw_geometric_trees(draw, w, h, t, colors)
-    draw_geometric_birds(draw, w, h, t, colors)
+    # Accent gradient bar
+    accent_h = 8
+    draw.rectangle([px, py, px + panel_w, py + accent_h], 
+                   fill=colors["primary"])
+    
+    return px, py, panel_w, panel_h
 
 # ============================================================================
-# TYPOGRAPHY & TEXT HANDLING
+# PREMIUM TYPOGRAPHY
 # ============================================================================
-def load_flat_font(size, bold=False):
-    """Load a font that works well with flat design."""
-    font_paths = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/System/Library/Fonts/Helvetica.ttc",
-        "C:/Windows/Fonts/arial.ttf",
-        "C:/Windows/Fonts/calibri.ttf"
-    ]
-    
-    if bold:
-        font_paths = [
+def load_premium_font(size, weight="regular"):
+    """Load premium fonts with fallback."""
+    font_map = {
+        "bold": [
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/System/Library/Fonts/Helvetica-Bold.ttc",
-            "C:/Windows/Fonts/arialbd.ttf",
-            "C:/Windows/Fonts/calibrib.ttf"
+            "C:/Windows/Fonts/segoeuib.ttf",
+            "C:/Windows/Fonts/ariblk.ttf"
+        ],
+        "regular": [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "C:/Windows/Fonts/segoeui.ttf",
+            "C:/Windows/Fonts/arial.ttf"
+        ],
+        "light": [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-ExtraLight.ttf",
+            "/System/Library/Fonts/Helvetica-Light.ttc",
+            "C:/Windows/Fonts/segoeuil.ttf",
+            "C:/Windows/Fonts/arial.ttf"
         ]
+    }
     
-    for font_path in font_paths:
-        if os.path.exists(font_path):
+    for path in font_map.get(weight, font_map["regular"]):
+        if os.path.exists(path):
             try:
-                return ImageFont.truetype(font_path, size)
+                return ImageFont.truetype(path, size)
             except:
                 continue
     
     return ImageFont.load_default(size)
 
-def wrap_text_flat(text, font, max_width):
-    """Wrap text for flat design layout."""
+def draw_text_with_glow(draw, pos, text, font, color, glow_color):
+    """Draw text with multi-layer glow effect."""
+    x, y = pos
+    
+    # Outer glow layers
+    for offset in range(8, 0, -2):
+        alpha = int(glow_color[3] * (8 - offset) / 8)
+        layer_color = glow_color[:3] + (alpha,)
+        
+        for dx in [-offset, 0, offset]:
+            for dy in [-offset, 0, offset]:
+                if dx != 0 or dy != 0:
+                    draw.text((x+dx, y+dy), text, font=font, fill=layer_color)
+    
+    # Main text
+    draw.text((x, y), text, font=font, fill=color)
+
+def wrap_text_smart(text, font, max_width, max_lines=4):
+    """Smart text wrapping with optimal line breaks."""
     words = text.split()
     lines = []
-    current_line = []
+    current = []
     
     for word in words:
-        test_line = ' '.join(current_line + [word])
-        if hasattr(font, 'getbbox'):
-            bbox = font.getbbox(test_line)
-            text_width = bbox[2] - bbox[0]
-        else:
-            text_width = font.getsize(test_line)[0]
+        test = ' '.join(current + [word])
         
-        if text_width <= max_width:
-            current_line.append(word)
+        try:
+            bbox = font.getbbox(test)
+            width = bbox[2] - bbox[0]
+        except:
+            width = font.getsize(test)[0]
+        
+        if width <= max_width:
+            current.append(word)
         else:
-            if current_line:
-                lines.append(' '.join(current_line))
-            current_line = [word]
+            if current:
+                lines.append(' '.join(current))
+            current = [word]
+            
+            if len(lines) >= max_lines:
+                break
     
-    if current_line:
-        lines.append(' '.join(current_line))
+    if current and len(lines) < max_lines:
+        lines.append(' '.join(current))
     
     return lines
 
 # ============================================================================
 # MAIN IMAGE GENERATION
 # ============================================================================
-def create_flat_design_image(width, height, theme_name, book, chapter, verse, 
-                            hook, t=0, is_video=False):
-    """Create a flat design image with geometric elements."""
-    colors = THEMES[theme_name]
+def create_premium_image(w, h, theme, book, chapter, verse, hook, t=0, video=False):
+    """Generate premium modern design."""
+    colors = THEMES[theme]
     
-    # Create base image
-    img = Image.new("RGBA", (width, height), colors["background"])
-    draw = ImageDraw.Draw(img)
+    # Background with gradient
+    img = create_gradient_background(w, h, colors)
+    draw = ImageDraw.Draw(img, 'RGBA')
     
-    # Draw geometric elements
-    draw_geometric_elements(draw, width, height, t, colors)
+    # Visual effects layers
+    draw_geometric_grid(draw, w, h, t, colors)
+    draw_glowing_orbs(draw, w, h, t, colors)
+    draw_floating_particles(draw, w, h, t, colors)
     
-    # Draw UI panel
-    panel_x, panel_y, panel_width, panel_height = draw_flat_ui_panel(
-        draw, width, height, colors
-    )
+    # Main content panel
+    px, py, pw, ph = draw_premium_panel(draw, w, h, colors)
     
     # Load fonts
-    title_font = load_flat_font(70, bold=True)
-    verse_font = load_flat_font(48, bold=False)
-    ref_font = load_flat_font(38, bold=True)
-    brand_font = load_flat_font(32, bold=True)
+    title_font = load_premium_font(int(h * 0.055), "bold")
+    verse_font = load_premium_font(int(h * 0.032), "regular")
+    ref_font = load_premium_font(int(h * 0.038), "bold")
+    brand_font = load_premium_font(int(h * 0.025), "light")
     
-    # Draw title/hook
+    # Draw hook/title with glow
     if hook:
-        if hasattr(title_font, 'getbbox'):
-            bbox = title_font.getbbox(hook.upper())
-            title_width = bbox[2] - bbox[0]
-        else:
-            title_width = title_font.getsize(hook.upper())[0]
+        hook_upper = hook.upper()
         
-        title_x = panel_x + (panel_width - title_width) // 2
-        title_y = panel_y - 100
+        try:
+            bbox = title_font.getbbox(hook_upper)
+            hook_w = bbox[2] - bbox[0]
+        except:
+            hook_w = title_font.getsize(hook_upper)[0]
         
-        draw.text((title_x, title_y), hook.upper(), 
-                 font=title_font, fill=colors["primary"])
+        hook_x = px + (pw - hook_w) // 2
+        hook_y = py - int(h * 0.08)
+        
+        draw_text_with_glow(
+            draw, (hook_x, hook_y), hook_upper,
+            title_font, colors["primary"], colors["glow"]
+        )
     
-    # Draw verse text
+    # Verse text with typewriter effect
     verse_text = "Be still, and know that I am God. I will be exalted among the nations, I will be exalted in the earth."
     
-    if is_video:
-        typewriter_duration = 5
-        typewriter_progress = min(1.0, t / typewriter_duration)
-        visible_text = verse_text[:int(len(verse_text) * typewriter_progress)]
+    if video:
+        progress = min(1.0, t / 4.0)
+        visible = verse_text[:int(len(verse_text) * progress)]
     else:
-        visible_text = verse_text
+        visible = verse_text
     
-    # Wrap verse text
-    max_text_width = panel_width - 100
-    lines = wrap_text_flat(visible_text, verse_font, max_text_width)
+    # Wrap and draw verse
+    max_text_w = pw - int(w * 0.08)
+    lines = wrap_text_smart(visible, verse_font, max_text_w)
     
-    # Draw verse lines
-    line_height = 65
-    text_y = panel_y + 100
+    line_spacing = int(h * 0.045)
+    text_y = py + int(ph * 0.25)
     
     for line in lines:
-        if hasattr(verse_font, 'getbbox'):
+        try:
             bbox = verse_font.getbbox(line)
-            line_width = bbox[2] - bbox[0]
-        else:
-            line_width = verse_font.getsize(line)[0]
+            line_w = bbox[2] - bbox[0]
+        except:
+            line_w = verse_font.getsize(line)[0]
         
-        line_x = panel_x + (panel_width - line_width) // 2
+        line_x = px + (pw - line_w) // 2
         
-        # Text shadow for flat depth
-        draw.text((line_x + 2, text_y + 2), line, 
-                 font=verse_font, fill=(0, 0, 0, 100))
+        # Subtle shadow
+        shadow_offset = 3
+        draw.text((line_x + shadow_offset, text_y + shadow_offset), 
+                 line, font=verse_font, 
+                 fill=(0, 0, 0, 80))
         
         # Main text
-        text_alpha = int(255 * (1 if not is_video else typewriter_progress))
+        alpha = 255 if not video else int(255 * progress)
         draw.text((line_x, text_y), line, 
-                 font=verse_font, fill=colors["text"][:3] + (text_alpha,))
+                 font=verse_font, fill=colors["text"][:3] + (alpha,))
         
-        text_y += line_height
+        text_y += line_spacing
     
-    # Draw reference
+    # Reference with accent background
     reference = f"{book} {chapter}:{verse}"
     
-    if hasattr(ref_font, 'getbbox'):
+    try:
         bbox = ref_font.getbbox(reference)
-        ref_width = bbox[2] - bbox[0]
-    else:
-        ref_width = ref_font.getsize(reference)[0]
+        ref_w = bbox[2] - bbox[0]
+        ref_h = bbox[3] - bbox[1]
+    except:
+        ref_w, ref_h = ref_font.getsize(reference)
     
-    ref_x = panel_x + panel_width - ref_width - 50
-    ref_y = panel_y + panel_height + 60
+    ref_x = px + pw - ref_w - int(w * 0.04)
+    ref_y = py + ph + int(h * 0.05)
     
-    ref_alpha = 255 if not is_video else int(255 * max(0, min(1.0, (t - 4) / 1)))
+    ref_alpha = 255 if not video else int(255 * max(0, (t - 3) / 1))
     
     if ref_alpha > 0:
-        # Reference background block
-        draw.rectangle([ref_x - 20, ref_y - 15, 
-                       ref_x + ref_width + 20, ref_y + 45], 
-                      fill=colors["primary"], 
-                      outline=colors["text"], 
-                      width=colors["border"]//2)
+        # Accent pill background
+        pill_padding = int(w * 0.02)
+        pill_radius = int(ref_h * 0.6)
         
-        # Reference text
+        draw.rounded_rectangle(
+            [ref_x - pill_padding, ref_y - pill_padding//2,
+             ref_x + ref_w + pill_padding, ref_y + ref_h + pill_padding//2],
+            radius=pill_radius,
+            fill=colors["primary"]
+        )
+        
         draw.text((ref_x, ref_y), reference, 
-                 font=ref_font, fill=colors["text"])
+                 font=ref_font, fill=colors["bg_gradient_top"])
     
-    # Draw brand watermark
-    brand_text = "STILL MIND FLAT"
-    if hasattr(brand_font, 'getbbox'):
-        bbox = brand_font.getbbox(brand_text)
-        brand_width = bbox[2] - bbox[0]
-    else:
-        brand_width = brand_font.getsize(brand_text)[0]
+    # Brand watermark
+    brand = "STILL MIND"
     
-    brand_x = panel_x + 50
-    brand_y = panel_y + panel_height + 60
+    try:
+        bbox = brand_font.getbbox(brand)
+        brand_w = bbox[2] - bbox[0]
+    except:
+        brand_w = brand_font.getsize(brand)[0]
     
-    draw.text((brand_x, brand_y), brand_text, 
-             font=brand_font, fill=colors["text"][:3] + (180,))
+    brand_x = px + int(w * 0.03)
+    brand_y = py + ph + int(h * 0.05)
+    
+    draw.text((brand_x, brand_y), brand, 
+             font=brand_font, fill=colors["text_secondary"][:3] + (180,))
     
     return img
 
 # ============================================================================
 # VIDEO GENERATION
 # ============================================================================
-def create_flat_design_video(width, height, theme_name, book, chapter, verse, hook):
-    """Create a flat design animation."""
-    duration = 7  # seconds
-    fps = 24
+def create_premium_video(w, h, theme, book, chapter, verse, hook):
+    """Create premium animated video."""
+    duration = 8
+    fps = 30
     
     def make_frame(t):
-        img = create_flat_design_image(
-            width, height, theme_name, book, chapter, verse, 
-            hook, t, True
-        )
+        img = create_premium_image(w, h, theme, book, chapter, verse, hook, t, True)
         return np.array(img.convert("RGB"))
     
     clip = VideoClip(make_frame, duration=duration)
     clip = clip.set_fps(fps)
     
-    # Create temporary file
     import tempfile
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-    temp_path = temp_file.name
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as f:
+        temp_path = f.name
     
     try:
         clip.write_videofile(
-            temp_path,
-            fps=fps,
-            codec="libx264",
-            audio_codec="aac",
-            verbose=False,
-            logger=None
+            temp_path, fps=fps, codec="libx264",
+            audio_codec="aac", verbose=False, logger=None,
+            bitrate="8000k"
         )
         
         with open(temp_path, 'rb') as f:
-            video_bytes = f.read()
-        
-        return video_bytes
+            return f.read()
     finally:
         if os.path.exists(temp_path):
             os.unlink(temp_path)
@@ -458,182 +462,147 @@ def create_flat_design_video(width, height, theme_name, book, chapter, verse, ho
 # ============================================================================
 # STREAMLIT UI
 # ============================================================================
-st.title("🟩 Still Mind: Flat Design Edition")
-st.markdown("### Clean, geometric design with bold colors and minimalist aesthetics")
-
-# Custom CSS for flat design
 st.markdown("""
 <style>
-    .stButton > button {
-        background-color: #2E86C1;
-        color: white;
-        border: none;
-        padding: 0.75rem;
-        border-radius: 8px;
-        font-weight: bold;
-        transition: all 0.2s;
+    .main { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); }
+    .stButton>button {
+        background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+        color: white; border: none; padding: 0.75rem 2rem;
+        border-radius: 12px; font-weight: 600;
+        transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(139,92,246,0.4);
     }
-    .stButton > button:hover {
-        background-color: #2874A6;
-        transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    .stButton>button:hover {
+        transform: translateY(-2px); box-shadow: 0 6px 20px rgba(139,92,246,0.6);
     }
-    .sidebar .sidebar-content {
-        background: linear-gradient(180deg, #1C2833, #2C3E50);
-    }
-    .stSlider > div > div > div {
-        background: #2E86C1;
-    }
+    .css-1d391kg { background: #1e293b; border-radius: 12px; padding: 1.5rem; }
+    h1 { background: linear-gradient(135deg, #8b5cf6, #06b6d4);
+         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+         font-size: 3rem !important; font-weight: 800; }
+    .stMetric { background: rgba(139,92,246,0.1); padding: 1rem;
+                border-radius: 8px; border-left: 4px solid #8b5cf6; }
 </style>
 """, unsafe_allow_html=True)
 
+st.title("✨ Still Mind Pro")
+st.markdown("### Premium Social Media Content • Viral-Ready Designs")
+
 # Sidebar
 with st.sidebar:
-    st.header("🎨 Flat Design Settings")
+    st.markdown("## 🎨 Design Studio")
     
-    theme_option = st.selectbox("Color Theme", list(THEMES.keys()))
-    size_option = st.selectbox("Size Format", list(SIZES.keys()))
-    width, height = SIZES[size_option]
+    theme = st.selectbox("Premium Theme", list(THEMES.keys()), 
+                        help="Select visual mood")
+    size_key = st.selectbox("Platform", list(SIZES.keys()),
+                           help="Optimized for each platform")
+    w, h = SIZES[size_key]
     
-    st.header("📝 Content")
-    hook = st.text_input("Header Text", "STILLNESS & STRENGTH")
+    st.markdown("---")
+    st.markdown("## 📝 Content")
     
-    bible_books = ["Psalm", "Isaiah", "Matthew", "John", "Romans", 
-                   "Philippians", "James", "Proverbs", "Ecclesiastes"]
-    book = st.selectbox("Book", bible_books)
+    hook = st.text_input("Headline", "FIND YOUR PEACE",
+                        help="Attention-grabbing hook")
+    
+    books = ["Psalm", "Proverbs", "Isaiah", "Matthew", "John", 
+            "Romans", "Philippians", "James", "Ecclesiastes", "Luke"]
+    book = st.selectbox("Book", books)
     
     col1, col2 = st.columns(2)
     with col1:
-        chapter = st.number_input("Chapter", 1, 150, 23)
+        chapter = st.number_input("Ch.", 1, 150, 46, help="Chapter")
     with col2:
-        verse = st.number_input("Verse", 1, 176, 1)
+        verse = st.number_input("V.", 1, 176, 10, help="Verse")
     
-    st.header("⏱️ Animation")
-    time_scrubber = st.slider("Animation Time", 0.0, 7.0, 0.0, 0.1)
+    st.markdown("---")
+    st.markdown("## ⚙️ Settings")
+    
+    quality = st.select_slider("Export Quality", 
+                               ["Good", "High", "Ultra"], value="Ultra")
+    
+    st.markdown("---")
+    time_t = st.slider("Preview Animation", 0.0, 8.0, 0.0, 0.1,
+                      help="Scrub through animation")
 
 # Main content
-col1, col2 = st.columns([2, 1])
+col1, col2 = st.columns([3, 1])
 
 with col1:
-    # Preview
-    st.subheader("🟩 Design Preview")
+    st.markdown("### 🖼️ Live Preview")
     
-    with st.spinner("Creating flat design..."):
-        preview_img = create_flat_design_image(
-            width, height, theme_option, book, chapter, verse, 
-            hook, time_scrubber, False
-        )
+    with st.spinner("Rendering premium design..."):
+        preview = create_premium_image(w, h, theme, book, chapter, verse, hook, time_t, False)
     
-    st.image(preview_img, use_column_width=True)
+    st.image(preview, use_container_width=True)
     
-    # Action buttons
-    col_btn1, col_btn2 = st.columns(2)
+    # Actions
+    col_a, col_b = st.columns(2)
     
-    with col_btn1:
-        # Download PNG
-        img_buffer = io.BytesIO()
-        preview_img.save(img_buffer, format='PNG', optimize=True, quality=95)
+    with col_a:
+        buf = io.BytesIO()
+        preview.save(buf, format='PNG', optimize=True, quality=95)
         
         st.download_button(
-            label="📥 Download PNG",
-            data=img_buffer.getvalue(),
-            file_name=f"flat_design_{book}_{chapter}_{verse}.png",
-            mime="image/png",
+            "📥 Download Image",
+            buf.getvalue(),
+            f"stillmind_{book}_{chapter}_{verse}.png",
+            "image/png",
             use_container_width=True
         )
     
-    with col_btn2:
-        # Generate video
-        if st.button("🎬 Create Flat Animation (7s)", use_container_width=True):
-            with st.spinner("Animating geometric elements..."):
-                video_data = create_flat_design_video(
-                    width, height, theme_option, book, chapter, verse, hook
-                )
+    with col_b:
+        if st.button("🎬 Create Video (8s)", use_container_width=True):
+            with st.spinner("Rendering animation..."):
+                video = create_premium_video(w, h, theme, book, chapter, verse, hook)
                 
-                if video_data:
-                    st.video(video_data)
-                    
-                    # Video download button
+                if video:
+                    st.video(video)
                     st.download_button(
-                        label="📥 Download MP4",
-                        data=video_data,
-                        file_name=f"flat_design_{book}_{chapter}_{verse}.mp4",
-                        mime="video/mp4",
+                        "📥 Download Video",
+                        video,
+                        f"stillmind_{book}_{chapter}_{verse}.mp4",
+                        "video/mp4",
                         use_container_width=True
                     )
 
 with col2:
-    # Info panel
-    st.subheader("📐 Design Elements")
+    st.markdown("### 📊 Stats")
     
-    st.write("**Flat Design Features:**")
-    st.success("✓ Geometric Shapes Only")
-    st.success("✓ Bold, Solid Colors")
-    st.success("✓ Thick Borders")
-    st.success("✓ Minimalist Aesthetics")
-    st.success("✓ Clear Typography")
-    st.success("✓ Consistent Spacing")
+    st.metric("Resolution", f"{w}×{h}")
+    st.metric("Aspect Ratio", f"{w//120}:{h//120}")
+    st.metric("Theme", theme)
     
-    st.metric("Image Size", f"{width} × {height}")
-    st.metric("Border Width", f"{THEMES[theme_option]['border']}px")
+    st.markdown("---")
+    st.markdown("### ✨ Features")
     
-    st.divider()
-    
-    # Color palette preview
-    st.subheader("🎨 Color Palette")
-    
-    colors = THEMES[theme_option]
-    col_pal1, col_pal2, col_pal3 = st.columns(3)
-    
-    with col_pal1:
-        st.color_picker("Primary", 
-                       value=f"#{colors['primary'][0]:02x}{colors['primary'][1]:02x}{colors['primary'][2]:02x}",
-                       disabled=True)
-    with col_pal2:
-        st.color_picker("Background", 
-                       value=f"#{colors['background'][0]:02x}{colors['background'][1]:02x}{colors['background'][2]:02x}",
-                       disabled=True)
-    with col_pal3:
-        st.color_picker("Text", 
-                       value=f"#{colors['text'][0]:02x}{colors['text'][1]:02x}{colors['text'][2]:02x}",
-                       disabled=True)
-    
-    st.divider()
-    
-    # Design tips
-    st.subheader("💡 Flat Design Principles")
-    
-    design_tips = [
-        "**Simplicity**: Remove unnecessary elements",
-        "**Clarity**: Use clear, readable typography",
-        "**Consistency**: Maintain uniform spacing and sizing",
-        "**Color**: Use bold, contrasting colors",
-        "**Hierarchy**: Establish clear visual hierarchy"
+    features = [
+        "🎨 Glassmorphism UI",
+        "✨ Animated Particles",
+        "🌟 Glowing Orbs",
+        "📐 Geometric Grid",
+        "🎭 Smooth Gradients",
+        "💫 Motion Effects"
     ]
     
-    for tip in design_tips:
-        st.markdown(f"- {tip}")
+    for feat in features:
+        st.markdown(f"**{feat}**")
     
-    st.divider()
+    st.markdown("---")
+    st.markdown("### 🎯 Best Practices")
     
-    # Export settings
-    st.subheader("⚙️ Export Settings")
+    tips = {
+        "Instagram": "Use 1080x1080 or Stories format",
+        "TikTok": "Vertical 1080x1920 performs best",
+        "YouTube": "Thumbnail should be eye-catching",
+        "Twitter": "Keep text minimal and bold"
+    }
     
-    export_quality = st.select_slider("Quality", ["Low", "Medium", "High"], value="High")
-    include_brand = st.checkbox("Include Brand Watermark", value=True)
+    for platform, tip in tips.items():
+        st.info(f"**{platform}**: {tip}")
 
-# Footer
-st.divider()
+st.markdown("---")
 st.markdown("""
-<div style='text-align: center; color: #7F8C8D; font-size: 0.9rem;'>
-    <p>🟩 Still Mind Flat Design Edition • Modern minimalist aesthetics • Clean geometric shapes</p>
+<div style='text-align: center; padding: 2rem; background: rgba(139,92,246,0.1); 
+            border-radius: 12px; margin-top: 2rem;'>
+    <h4 style='color: #8b5cf6; margin-bottom: 0.5rem;'>✨ Premium Content Generation</h4>
+    <p style='color: #94a3b8;'>Modern • Professional • Viral-Ready</p>
 </div>
 """, unsafe_allow_html=True)
-
-# Cleanup
-for file in os.listdir("."):
-    if file.startswith("temp_") and file.endswith(".mp4"):
-        try:
-            os.remove(file)
-        except:
-            pass
