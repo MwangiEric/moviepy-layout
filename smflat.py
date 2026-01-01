@@ -531,7 +531,7 @@ with col1:
     with st.spinner("Rendering premium design..."):
         preview = create_premium_image(w, h, theme, book, chapter, verse, hook, time_t, False)
     
-    st.image(preview, use_container_width=True)
+    st.image(preview, use_column_width=True)
     
     # Actions
     col_a, col_b = st.columns(2)
@@ -560,7 +560,7 @@ with col1:
                         video,
                         f"stillmind_{book}_{chapter}_{verse}.mp4",
                         "video/mp4",
-                        use_container_width=True
+                        use_column_width=True
                     )
 
 with col2:
