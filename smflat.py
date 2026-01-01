@@ -1,38 +1,19 @@
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
-import io, os, math, json
+import io, os, math
 import numpy as np
 from moviepy.editor import VideoClip
 import requests
 
 st.set_page_config(page_title="Still Mind", page_icon="✨", layout="centered")
 
-# Flat Design Themes
-THEMES = {
-    "Purple Minimal": {
-        "bg": (88, 86, 214),
-        "panel": (51, 65, 85),
-        "text": (248, 250, 252),
-        "accent": (255, 107, 107)
-    },
-    "Ocean Blue": {
-        "bg": (34, 211, 238),
-        "panel": (30, 41, 59),
-        "text": (240, 249, 255),
-        "accent": (251, 191, 36)
-    },
-    "Forest Green": {
-        "bg": (52, 211, 153),
-        "panel": (34, 60, 50),
-        "text": (236, 253, 245),
-        "accent": (251, 191, 36)
-    },
-    "Sunset Orange": {
-        "bg": (251, 146, 60),
-        "panel": (55, 65, 81),
-        "text": (254, 252, 232),
-        "accent": (236, 72, 153)
-    }
+# Green, Navy, White, Grey theme
+COLORS = {
+    "bg": (26, 54, 93),      # Navy Blue
+    "panel": (52, 73, 94),   # Grey Blue
+    "text": (248, 250, 252), # White
+    "accent": (46, 204, 113), # Green
+    "grey": (149, 165, 166)  # Grey
 }
 
 BIBLE_BOOKS = ["Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", 
@@ -47,6 +28,18 @@ BIBLE_BOOKS = ["Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Josh
                "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", 
                "Hebrews", "James", "1 Peter", "2 Peter", "1 John", "2 John", 
                "3 John", "Jude", "Revelation"]
+
+# Bible verse database
+VERSES = {
+    ("Psalm", 46, 10): "Be still, and know that I am God. I will be exalted among the nations, I will be exalted in the earth.",
+    ("John", 14, 27): "Peace I leave with you; my peace I give you. I do not give to you as the world gives. Do not let your hearts be troubled and do not be afraid.",
+    ("Philippians", 4, 6): "Do not be anxious about anything, but in every situation, by prayer and petition, with thanksgiving, present your requests to God.",
+    ("Matthew", 11, 28): "Come to me, all you who are weary and burdened, and I will give you rest.",
+    ("Isaiah", 41, 10): "So do not fear, for I am with you; do not be dismayed, for I am your God. I will strengthen you and help you.",
+    ("Proverbs", 3, 5): "Trust in the Lord with all your heart and lean not on your own understanding.",
+    ("Romans", 8, 28): "And we know that in all things God works for the good of those who love him, who have been called according to his purpose.",
+    ("Jeremiah", 29, 11): "For I know the plans I have for you, declares the Lord, plans to prosper you and not to harm you, plans to give you hope and a future.",
+}
 
 def load_font(size, bold=False):
     paths = [
@@ -85,7 +78,7 @@ def wrap_text(text, font, max_w):
     
     return lines
 
-def draw_circle_pattern(draw, w, h, color, count=8):
+def draw_circle_pattern(draw, w, h, count=8):
     for i in range(count):
         angle = (i / count) * (2 * math.pi)
         x = w/2 + (w * 0.4) * math.cos(angle)
@@ -95,26 +88,24 @@ def draw_circle_pattern(draw, w, h, color, count=8):
         for j in range(3):
             s = size * (1 + j * 0.3)
             alpha = int(40 / (j + 1))
-            c = color + (alpha,)
+            c = COLORS["panel"] + (alpha,)
             draw.ellipse([x-s, y-s, x+s, y+s], fill=c)
 
-def create_flat_design(w, h, theme, book, chapter, verse, verse_text):
-    colors = THEMES[theme]
-    
+def create_flat_design(w, h, book, chapter, verse, verse_text, t=0, is_video=False):
     # Base
-    img = Image.new("RGB", (w, h), colors["bg"])
+    img = Image.new("RGB", (w, h), COLORS["bg"])
     overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     
     # Pattern
-    draw_circle_pattern(draw, w, h, colors["panel"][:3], 12)
+    draw_circle_pattern(draw, w, h, 12)
     
     # Panel
     pw, ph = int(w * 0.8), int(h * 0.6)
     px, py = (w - pw) // 2, (h - ph) // 2
     
     draw.rounded_rectangle([px, py, px + pw, py + ph], 
-                          radius=20, fill=colors["panel"] + (250,))
+                          radius=20, fill=COLORS["panel"] + (250,))
     
     img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
     draw = ImageDraw.Draw(img)
@@ -133,10 +124,17 @@ def create_flat_design(w, h, theme, book, chapter, verse, verse_text):
     
     tx = px + (pw - tw) // 2
     ty = py - int(h * 0.08)
-    draw.text((tx, ty), title, font=title_font, fill=colors["accent"])
+    draw.text((tx, ty), title, font=title_font, fill=COLORS["accent"])
+    
+    # Typewriter effect for video
+    if is_video:
+        chars_visible = int(len(verse_text) * min(1.0, t / 4.0))
+        display_text = verse_text[:chars_visible]
+    else:
+        display_text = verse_text
     
     # Verse
-    lines = wrap_text(verse_text, verse_font, pw - int(w * 0.1))
+    lines = wrap_text(display_text, verse_font, pw - int(w * 0.1))
     
     line_h = int(h * 0.045)
     text_y = py + int(ph * 0.3)
@@ -148,48 +146,43 @@ def create_flat_design(w, h, theme, book, chapter, verse, verse_text):
             lw = verse_font.getsize(line)[0]
         
         lx = px + (pw - lw) // 2
-        draw.text((lx, text_y), line, font=verse_font, fill=colors["text"])
+        draw.text((lx, text_y), line, font=verse_font, fill=COLORS["text"])
         text_y += line_h
     
-    # Reference
-    ref = f"{book} {chapter}:{verse}"
-    try:
-        rw = ref_font.getbbox(ref)[2]
-        rh = ref_font.getbbox(ref)[3]
-    except:
-        rw, rh = ref_font.getsize(ref)
+    # Reference (fade in after typewriter)
+    ref_alpha = 255 if not is_video else int(255 * max(0, min(1, (t - 4) / 1)))
     
-    rx = px + pw - rw - 30
-    ry = py + ph + int(h * 0.05)
-    
-    pad = 15
-    draw.rounded_rectangle([rx - pad, ry - pad//2, rx + rw + pad, ry + rh + pad//2],
-                          radius=20, fill=colors["accent"])
-    draw.text((rx, ry), ref, font=ref_font, fill=colors["bg"])
+    if ref_alpha > 0:
+        ref = f"{book} {chapter}:{verse}"
+        try:
+            rw = ref_font.getbbox(ref)[2]
+            rh = ref_font.getbbox(ref)[3]
+        except:
+            rw, rh = ref_font.getsize(ref)
+        
+        rx = px + pw - rw - 30
+        ry = py + ph + int(h * 0.05)
+        
+        pad = 15
+        draw.rounded_rectangle([rx - pad, ry - pad//2, rx + rw + pad, ry + rh + pad//2],
+                              radius=20, fill=COLORS["accent"])
+        draw.text((rx, ry), ref, font=ref_font, fill=COLORS["bg"])
     
     return img
 
-def create_video(w, h, theme, book, chapter, verse, verse_text):
+def create_video(w, h, book, chapter, verse, verse_text):
     def make_frame(t):
-        img = create_flat_design(w, h, theme, book, chapter, verse, verse_text)
-        
-        # Simple fade in
-        if t < 1:
-            arr = np.array(img).astype(float)
-            arr = (arr * t).astype('uint8')
-            return arr
-        
-        return np.array(img)
+        return np.array(create_flat_design(w, h, book, chapter, verse, verse_text, t, True))
     
     clip = VideoClip(make_frame, duration=6)
-    clip = clip.set_fps(30)
+    clip = clip.set_fps(15)
     
     import tempfile
     with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as f:
         temp = f.name
     
     try:
-        clip.write_videofile(temp, fps=30, codec="libx264", 
+        clip.write_videofile(temp, fps=15, codec="libx264", 
                            verbose=False, logger=None)
         with open(temp, 'rb') as f:
             return f.read()
@@ -222,7 +215,7 @@ Write:
 Keep it inspirational, relatable, and engaging. Make people want to share it."""
 
         data = {
-            "model": "mixtral-8x7b-32768",
+            "model": "llama3-8b-8192",
             "messages": [
                 {"role": "system", "content": "You are a social media expert specializing in faith-based content that goes viral."},
                 {"role": "user", "content": prompt}
@@ -238,10 +231,15 @@ Keep it inspirational, relatable, and engaging. Make people want to share it."""
             content = result["choices"][0]["message"]["content"]
             return content, None
         else:
-            return None, f"API Error: {response.status_code}"
+            return None, f"API Error: {response.status_code} - {response.text}"
             
     except Exception as e:
         return None, str(e)
+
+def get_verse_text(book, chapter, verse):
+    """Get verse text from database or return default."""
+    key = (book, chapter, verse)
+    return VERSES.get(key, "Enter your verse text here...")
 
 # UI
 st.title("Still Mind")
@@ -252,22 +250,17 @@ with col1:
     book = st.selectbox("Book", BIBLE_BOOKS, index=18)
 
 with col2:
-    chapter = st.number_input("Chapter", 1, 150, 46)
+    chapter = st.number_input("Chapter", 1, 150, 46, key="chapter_input")
 
 with col3:
-    verse = st.number_input("Verse", 1, 176, 10)
+    verse = st.number_input("Verse", 1, 176, 10, key="verse_input")
 
-theme = st.selectbox("Theme", list(THEMES.keys()))
+# Auto-update verse text when selection changes
+verse_text = get_verse_text(book, chapter, verse)
+verse_text = st.text_area("Verse Text", verse_text, height=100, key="verse_text_area")
 
-verse_text = st.text_area("Verse Text", 
-    "Be still, and know that I am God. I will be exalted among the nations, I will be exalted in the earth.",
-    height=100)
-
-col_a, col_b, col_c = st.columns(3)
-
-with col_a:
-    size = st.selectbox("Size", ["Instagram Post (1080x1080)", "Instagram Story (1080x1920)", 
-                                  "YouTube (1920x1080)"])
+size = st.selectbox("Size", ["Instagram Post (1080x1080)", "Instagram Story (1080x1920)", 
+                              "YouTube (1920x1080)"])
 
 w, h = (1080, 1080) if "Post" in size else (1080, 1920) if "Story" in size else (1920, 1080)
 
@@ -278,7 +271,7 @@ col_gen1, col_gen2, col_gen3 = st.columns(3)
 with col_gen1:
     if st.button("Generate Image", type="primary"):
         with st.spinner("Generating..."):
-            img = create_flat_design(w, h, theme, book, chapter, verse, verse_text)
+            img = create_flat_design(w, h, book, chapter, verse, verse_text)
             
             st.image(img, width=600)
             
@@ -291,7 +284,7 @@ with col_gen1:
 with col_gen2:
     if st.button("Generate Video"):
         with st.spinner("Rendering..."):
-            video = create_video(w, h, theme, book, chapter, verse, verse_text)
+            video = create_video(w, h, book, chapter, verse, verse_text)
             
             st.video(video)
             
