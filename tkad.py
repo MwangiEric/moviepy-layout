@@ -1,221 +1,758 @@
 import streamlit as st
-import os, io, tempfile, math, time, gc, requests
-from PIL import Image, ImageDraw, ImageFont
+import json
+import requests
+import textwrap
 import numpy as np
-from moviepy.editor import ImageSequenceClip, AudioFileClip
-import contextlib
+from PIL import Image, ImageDraw, ImageFont
+from io import BytesIO
+import tempfile
+import os
+from moviepy.editor import ImageClip, concatenate_videoclips
 import cv2
-import base64
+from functools import lru_cache
 
-# --------------------------------------------------------
-# CONFIG
-# --------------------------------------------------------
-FPS, DURATION = 24, 4
-TOTAL_FRAMES  = FPS * DURATION
+# Page configuration
+st.set_page_config(
+    page_title="Polotno Studio Renderer",
+    page_icon="🎨",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Colours
-MAROON      = (153, 0, 0)
-WHITE       = (255, 255, 255)
-LIME_GREEN  = (50, 205, 50)
-TEXT_COLOUR = (30, 30, 30)
-BG_COLOUR   = (245, 245, 247)
-ACCENT      = (153, 0, 0)
-ACCENT_GOLD = "#D4AF37"
+# CSS for better UI
+st.markdown("""
+<style>
+    .stProgress > div > div > div > div {
+        background-color: #ff4b4b;
+    }
+    .preview-container {
+        border: 2px dashed #ccc;
+        border-radius: 10px;
+        padding: 20px;
+        text-align: center;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# Remote assets (CORS proxy)
-PROXY = "https://cors.ericmwangi13.workers.dev/?url="
-LOGO_URL    = "https://ik.imagekit.io/ericmwangi/tklogo.png?updatedAt=1764543349107"
-PRODUCT_URL = PROXY + "https://www.tripplek.co.ke/wp-content/uploads/2025/02/iphone-16e-33.png"
-AUDIO_URL   = PROXY + "https://ik.imagekit.io/ericmwangi/tech-ambient.mp3?updatedAt=1764372632499"
+# =============================================================================
+# UTILITY FUNCTIONS
+# =============================================================================
 
-# --------------------------------------------------------
-# DYNAMIC LAYOUT BY CANVAS SIZE
-# --------------------------------------------------------
-def get_responsive_layout(canvas_w, canvas_h):
-    """Dynamic zones that adapt to ANY size using conditions"""
-    aspect_ratio = canvas_w / canvas_h
-    margin = min(canvas_w, canvas_h) * 0.08
+def hex_to_rgba(color_str, alpha=255):
+    """Convert hex or rgba string to RGBA tuple."""
+    if not color_str:
+        return (0, 0, 0, alpha)
     
-    if aspect_ratio < 0.7:  # Portrait Mobile
-        return {
-            "logo": (margin, margin, margin*4, margin*1.5),
-            "title": (margin, 0.08*canvas_h, canvas_w-margin, 0.18*canvas_h),
-            "product": (margin, 0.22*canvas_h, canvas_w-margin, 0.68*canvas_h),
-            "price": (margin, 0.72*canvas_h, 0.45*canvas_w, 0.82*canvas_h),
-            "cta": (0.48*canvas_w, 0.72*canvas_h, canvas_w-margin, 0.82*canvas_h),
-        }
-    else:  # Square/Landscape
-        return {
-            "logo": (margin, margin, margin*3, margin*1.2),
-            "title": (margin, 0.06*canvas_h, canvas_w-margin, 0.16*canvas_h),
-            "product": (margin, 0.20*canvas_h, canvas_w-margin, 0.70*canvas_h),
-            "price": (0.65*canvas_w, 0.72*canvas_h, canvas_w-margin, 0.82*canvas_h),
-            "cta": (margin, 0.72*canvas_h, 0.35*canvas_w, 0.82*canvas_h),
-        }
+    color_str = str(color_str).strip()
+    
+    # Handle rgba(r,g,b,a) format
+    if color_str.startswith('rgba'):
+        import re
+        match = re.match(r'rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)', color_str)
+        if match:
+            r, g, b = int(match.group(1)), int(match.group(2)), int(match.group(3))
+            a = int(float(match.group(4)) * 255) if match.group(4) else alpha
+            return (r, g, b, a)
+    
+    # Handle hex format
+    color_str = color_str.lstrip('#')
+    if len(color_str) == 3:
+        color_str = ''.join([c*2 for c in color_str])
+    if len(color_str) >= 6:
+        r = int(color_str[0:2], 16)
+        g = int(color_str[2:4], 16)
+        b = int(color_str[4:6], 16)
+        a = int(color_str[6:8], 16) if len(color_str) >= 8 else alpha
+        return (r, g, b, a)
+    
+    return (0, 0, 0, alpha)
 
-FORMAT_SIZES = {
-    "TikTok / Reels (9:16)": (1080, 1920),
-    "Instagram (4:5)":       (1080, 1350),
-    "WhatsApp Story (1:1)":  (1080, 1080),
-}
 
-# --------------------------------------------------------
-# BASE64 SESSION CACHE
-# --------------------------------------------------------
-@st.cache_resource
-def url_to_base64(url, name):
+@st.cache_data(ttl=3600, show_spinner=False)
+def download_image(url):
+    """
+    Cached image downloader to prevent repeated requests.
+    Returns PIL Image in RGBA mode or None if failed.
+    """
+    if not url:
+        return None
+    
     try:
-        resp = requests.get(url, timeout=30)
-        resp.raise_for_status()
-        b64 = base64.b64encode(resp.content).decode()
-        return b64
+        # Handle data URLs
+        if url.startswith('data:image'):
+            import base64
+            header, encoded = url.split(',', 1)
+            data = base64.b64decode(encoded)
+            return Image.open(BytesIO(data)).convert('RGBA')
+        
+        # Handle HTTP URLs
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.0'
+        }
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        return Image.open(BytesIO(response.content)).convert('RGBA')
+        
     except Exception as e:
-        st.warning(f"❌ {name} download failed: {e}")
+        st.warning(f"⚠️ Failed to load image: {url[:50]}... ({str(e)})")
         return None
 
-# Auto-download
-if "logo_b64" not in st.session_state:
-    st.session_state.logo_b64 = url_to_base64(LOGO_URL, "logo")
-if "product_b64" not in st.session_state:
-    st.session_state.product_b64 = url_to_base64(PRODUCT_URL, "product")
 
-# --------------------------------------------------------
-# FIXED FONT + TEXT BOX FUNCTIONS
-# --------------------------------------------------------
-@st.cache_resource
-def _font_bytes(bold=True):
-    url = ("https://github.com/google/fonts/raw/main/ofl/inter/" +
-           ("Inter-Bold.ttf" if bold else "Inter-Medium.ttf"))
-    return requests.get(url, timeout=20).content
-
-def get_font(size, bold=True):
-    size = max(20, int(size))
+def get_video_frame(video_path, timestamp_seconds, target_w, target_h):
+    """
+    Extract a specific frame from a video file at given timestamp.
+    Supports local paths and URLs.
+    """
     try:
-        return ImageFont.truetype(io.BytesIO(_font_bytes(bold)), size)
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return None
+            
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        frame_no = int(timestamp_seconds * fps)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
+        
+        ret, frame = cap.read()
+        cap.release()
+        
+        if ret:
+            # Convert BGR to RGB
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(frame).convert("RGBA")
+            return img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+            
+    except Exception as e:
+        st.warning(f"⚠️ Video frame extraction failed: {e}")
+    
+    return None
+
+
+def get_font(font_size, font_family="Arial", font_weight="normal"):
+    """
+    Load font with comprehensive fallback chain.
+    """
+    # Scale font size for different systems
+    scaled_size = max(8, int(font_size))
+    
+    font_variants = []
+    
+    # Build font search list based on family and weight
+    if font_weight in ('bold', '700', '800', '900'):
+        font_variants.extend([
+            f"{font_family}-Bold.ttf",
+            f"{font_family}-Bold.otf",
+            f"{font_family}Bold.ttf",
+            f"{font_family}-BoldMT.ttf",
+            "arialbd.ttf",
+            "Arial Bold.ttf",
+        ])
+    else:
+        font_variants.extend([
+            f"{font_family}.ttf",
+            f"{font_family}.otf",
+            f"{font_family}-Regular.ttf",
+            f"{font_family}-Regular.otf",
+            "arial.ttf",
+            "Arial.ttf",
+            "DejaVuSans.ttf",
+            "LiberationSans-Regular.ttf",
+        ])
+    
+    # System font paths
+    font_paths = [
+        "",  # Current directory
+        "/usr/share/fonts/truetype/",
+        "/usr/share/fonts/truetype/dejavu/",
+        "/usr/share/fonts/truetype/liberation/",
+        "/usr/share/fonts/truetype/msttcorefonts/",
+        "/System/Library/Fonts/",
+        "/Library/Fonts/",
+        "C:/Windows/Fonts/",
+        os.path.expanduser("~/.fonts/"),
+    ]
+    
+    # Try to load font
+    for variant in font_variants:
+        for path in font_paths:
+            try:
+                font_path = os.path.join(path, variant)
+                if os.path.exists(font_path):
+                    return ImageFont.truetype(font_path, scaled_size)
+            except:
+                continue
+    
+    # Final fallback
+    try:
+        return ImageFont.truetype("arial.ttf", scaled_size)
     except:
+        return ImageFont.load_default()
+
+
+def wrap_text(content, font, max_width):
+    """
+    Wrap text to fit within max_width pixels.
+    Returns list of lines.
+    """
+    if not content:
+        return [""]
+    
+    words = content.split(' ')
+    lines = []
+    current_line = []
+    
+    for word in words:
+        test_line = ' '.join(current_line + [word])
         try:
-            return ImageFont.truetype("arialbd.ttf" if bold else "arial.ttf", size)
+            bbox = font.getbbox(test_line)
+            line_width = bbox[2] - bbox[0]
         except:
-            return ImageFont.load_default()
+            line_width = len(test_line) * scaled_size * 0.6  # Fallback estimate
+        
+        if line_width <= max_width:
+            current_line.append(word)
+        else:
+            if current_line:
+                lines.append(' '.join(current_line))
+            current_line = [word]
+    
+    if current_line:
+        lines.append(' '.join(current_line))
+    
+    return lines if lines else [content]
 
-def smart_text_box(draw, text, rect, font_size=60, bg_color=(0,0,0,180), text_color=WHITE):
-    """FIXED: Perfect text box that ALWAYS fits rectangle"""
-    x1, y1, x2, y2 = rect
-    max_w, max_h = x2-x1-40, y2-y1-40  # padding
-    
-    # Find perfect font size
-    font = get_font(font_size)
-    while font_size > 20:
-        bbox = draw.textbbox((0,0), text, font=font)
-        text_w, text_h = bbox[2]-bbox[0], bbox[3]-bbox[1]
-        if text_w <= max_w and text_h <= max_h:
-            break
-        font_size -= 2
-        font = get_font(font_size)
-    
-    # Draw bg rect
-    draw.rounded_rectangle(rect, radius=20, fill=bg_color, outline="white", width=2)
-    
-    # Center text
-    text_x = x1 + 20 + (max_w - text_w) // 2
-    text_y = y1 + 20 + (max_h - text_h) // 2
-    draw.text((text_x, text_y), text, font=font, fill=text_color)
-    
-    return font_size
 
-def b64_to_pil(b64, target_size, name):
-    if b64 is None:
-        w, h = target_size
-        img = Image.new("RGBA", target_size, (200, 200, 200, 255))
-        draw = ImageDraw.Draw(img)
-        draw.rounded_rectangle([10,10,w-10,h-10], radius=20, fill="#F0F0F0")
-        draw.text((w//2, h//2), name[:4], fill="#666", anchor="mm")
-        return img
-    try:
-        img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGBA")
-        return img.resize(target_size, Image.Resampling.LANCZOS)
-    except:
-        return Image.new("RGBA", target_size, (200, 200, 200, 255))
+# =============================================================================
+# RENDERING FUNCTIONS
+# =============================================================================
 
-# --------------------------------------------------------
-# DRAW FRAME WITH DYNAMIC LAYOUT + TEXT BOXES
-# --------------------------------------------------------
-def draw_frame(t, product, specs, price, fmt="TikTok / Reels (9:16)"):
-    w, h = FORMAT_SIZES[fmt]
-    zones = get_responsive_layout(w, h)
+def render_layer(img, layer, canvas_w, canvas_h, progress=1.0, animation_style="none"):
+    """
+    Render a single Polotno layer onto an image.
     
-    # Base canvas
-    rgb = Image.new("RGB", (w, h), BG_COLOUR)
-    canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(canvas)
+    Args:
+        img: PIL Image to render onto
+        layer: Polotno layer dict
+        canvas_w, canvas_h: Canvas dimensions
+        progress: Animation progress (0.0 to 1.0)
+        animation_style: Type of animation to apply
+    """
+    draw = ImageDraw.Draw(img)
     
-    # LOGO
-    logo_size = (int(zones["logo"][2]-zones["logo"][0]), int(zones["logo"][3]-zones["logo"][1]))
-    logo = b64_to_pil(st.session_state.logo_b64, logo_size, "Logo")
-    canvas.paste(logo, (int(zones["logo"][0]), int(zones["logo"][1])), logo)
+    # Extract properties - Polotno uses absolute pixel coordinates
+    layer_type = layer.get('type', 'text')
+    x = int(layer.get('x', 0))
+    y = int(layer.get('y', 0))
+    w = int(layer.get('width', 100))
+    h = int(layer.get('height', 100))
+    opacity = layer.get('opacity', 1.0) * progress
+    angle = layer.get('rotation', 0)
     
-    # PRODUCT (with float animation)
-    prod_rect = zones["product"]
-    prod_size = (int(prod_rect[2]-prod_rect[0]), int(prod_rect[3]-prod_rect[1]))
-    phone = b64_to_pil(st.session_state.product_b64, prod_size, "Product")
-    float_y = int(prod_rect[1] + 15 * math.sin(t * 1.1))
-    canvas.paste(phone, (int(prod_rect[0]), float_y), phone)
+    # Animation transforms
+    if animation_style == "fade":
+        opacity = layer.get('opacity', 1.0) * progress
+    elif animation_style == "slide_up":
+        y_offset = int((1 - progress) * 50)
+        y -= y_offset
+    elif animation_style == "zoom":
+        scale = 0.5 + (0.5 * progress)
+        w = int(w * scale)
+        h = int(h * scale)
+        x = int(x + (layer.get('width', 100) - w) / 2)
+    elif animation_style == "typewriter" and layer_type == "text":
+        content = layer.get('text', '')
+        visible_chars = int(len(content) * progress)
+        layer = {**layer, 'text': content[:visible_chars]}
     
-    # TITLE - PERFECT TEXT BOX
-    smart_text_box(draw, product.upper(), zones["title"], 80, (*ACCENT, 200), ACCENT_GOLD)
+    # Render based on type
+    if layer_type in ('text', 'badge'):
+        render_text_layer(img, layer, x, y, w, h, opacity, angle)
     
-    # PRICE - GOLD BADGE
-    smart_text_box(draw, price, zones["price"], 60, (*ACCENT, 255), ACCENT_GOLD)
+    elif layer_type == 'image':
+        render_image_layer(img, layer, x, y, w, h, opacity, angle)
     
-    # CTA - CYAN BUTTON
-    smart_text_box(draw, "SHOP NOW", zones["cta"], 50, (*MAROON, 255), WHITE)
+    elif layer_type == 'video':
+        render_video_layer(img, layer, x, y, w, h, opacity, progress)
     
-    # Website footer
-    web_rect = (w//2-200, h-80, w//2+200, h-40)
-    smart_text_box(draw, "www.tripplek.co.ke", web_rect, 32, None, TEXT_COLOUR)
-    
-    return Image.alpha_composite(rgb, canvas)
+    elif layer_type == 'figure' or layer_type == 'rect':
+        render_shape_layer(img, layer, x, y, w, h, opacity, angle)
 
-# --------------------------------------------------------
+
+def render_text_layer(img, layer, x, y, w, h, opacity, angle):
+    """Render text layer with wrapping and styling."""
+    content = layer.get('text', '')
+    if not content:
+        return
+    
+    font_size = int(layer.get('fontSize', 30))
+    font_family = layer.get('fontFamily', 'Arial')
+    font_weight = layer.get('fontWeight', 'normal')
+    fill = layer.get('fill', '#000000')
+    align = layer.get('align', 'left')
+    line_height = layer.get('lineHeight', 1.2)
+    
+    # Load font
+    font = get_font(font_size, font_family, font_weight)
+    
+    # Wrap text
+    lines = wrap_text(content, font, w)
+    
+    # Calculate total height
+    total_height = len(lines) * font_size * line_height
+    
+    # Create text layer for rotation/opacity support
+    text_layer = Image.new('RGBA', (w * 2, h * 2), (0, 0, 0, 0))
+    text_draw = ImageDraw.Draw(text_layer)
+    
+    # Color with opacity
+    rgba = hex_to_rgba(fill, int(255 * opacity))
+    
+    # Draw each line
+    start_y = (h * 2 - total_height) / 2 if align == 'center' else 0
+    
+    for i, line in enumerate(lines):
+        # Calculate x offset for alignment
+        try:
+            bbox = font.getbbox(line)
+            line_w = bbox[2] - bbox[0]
+        except:
+            line_w = len(line) * font_size * 0.6
+        
+        if align == 'center':
+            line_x = (w * 2 - line_w) / 2
+        elif align == 'right':
+            line_x = w * 2 - line_w
+        else:
+            line_x = 0
+        
+        line_y = start_y + (i * font_size * line_height)
+        text_draw.text((line_x, line_y), line, font=font, fill=rgba)
+    
+    # Apply rotation if needed
+    if angle != 0:
+        text_layer = text_layer.rotate(-angle, expand=True, resample=Image.Resampling.BICUBIC)
+    
+    # Composite onto main image
+    paste_x = x - w
+    paste_y = y - h
+    img.alpha_composite(text_layer, (paste_x, paste_y))
+
+
+def render_image_layer(img, layer, x, y, w, h, opacity, angle):
+    """Render image layer with caching support."""
+    src = layer.get('src', '')
+    if not src:
+        return
+    
+    # Use cached downloader
+    layer_img = download_image(src)
+    if not layer_img:
+        return
+    
+    # Resize to target dimensions
+    layer_img = layer_img.resize((w, h), Image.Resampling.LANCZOS)
+    
+    # Apply opacity
+    if opacity < 1.0:
+        alpha = layer_img.split()[3].point(lambda p: int(p * opacity))
+        layer_img.putalpha(alpha)
+    
+    # Apply rotation
+    if angle != 0:
+        layer_img = layer_img.rotate(-angle, expand=True, resample=Image.Resampling.BICUBIC)
+    
+    # Paste onto main image
+    img.paste(layer_img, (x, y), layer_img)
+
+
+def render_video_layer(img, layer, x, y, w, h, opacity, progress):
+    """Render video layer by extracting frame at progress time."""
+    src = layer.get('src', '')
+    if not src:
+        return
+    
+    # Calculate timestamp based on progress
+    # Assuming we want to loop or show portion of video
+    video_duration = layer.get('duration', 5)  # Default 5s if not specified
+    timestamp = (progress * video_duration) % video_duration
+    
+    frame = get_video_frame(src, timestamp, w, h)
+    if frame:
+        if opacity < 1.0:
+            alpha = frame.split()[3].point(lambda p: int(p * opacity))
+            frame.putalpha(alpha)
+        img.paste(frame, (x, y), frame)
+
+
+def render_shape_layer(img, layer, x, y, w, h, opacity, angle):
+    """Render shape/rectangle layers."""
+    draw = ImageDraw.Draw(img)
+    fill = layer.get('fill', '#000000')
+    stroke = layer.get('stroke', None)
+    stroke_width = layer.get('strokeWidth', 0)
+    corner_radius = layer.get('cornerRadius', 0)
+    
+    rgba = hex_to_rgba(fill, int(255 * opacity))
+    
+    # Draw rounded rectangle if cornerRadius exists
+    if corner_radius > 0:
+        draw.rounded_rectangle(
+            [x, y, x + w, y + h],
+            radius=corner_radius,
+            fill=rgba,
+            outline=hex_to_rgba(stroke) if stroke else None,
+            width=stroke_width
+        )
+    else:
+        draw.rectangle(
+            [x, y, x + w, y + h],
+            fill=rgba,
+            outline=hex_to_rgba(stroke) if stroke else None,
+            width=stroke_width
+        )
+
+
+def render_frame(json_data, progress=1.0, scale=1.0, animation_style="none"):
+    """
+    Render a complete frame at given animation progress.
+    
+    Args:
+        json_data: Polotno JSON
+        progress: 0.0 to 1.0 animation progress
+        scale: Output scale factor
+        animation_style: Animation type
+    
+    Returns:
+        PIL Image
+    """
+    # Get dimensions
+    orig_w = int(json_data.get('width', 1080))
+    orig_h = int(json_data.get('height', 1080))
+    
+    w = int(orig_w * scale)
+    h = int(orig_h * scale)
+    
+    # Background
+    bg_color = json_data.get('background', '#ffffff')
+    img = Image.new('RGBA', (w, h), hex_to_rgba(bg_color))
+    
+    # Scale layers proportionally
+    scale_x = w / orig_w
+    scale_y = h / orig_h
+    
+    layers = json_data.get('layers', [])
+    
+    # Sort by z-index if present
+    layers = sorted(layers, key=lambda l: l.get('z', 0))
+    
+    for layer in layers:
+        # Scale coordinates
+        scaled_layer = layer.copy()
+        scaled_layer['x'] = int(layer.get('x', 0) * scale_x)
+        scaled_layer['y'] = int(layer.get('y', 0) * scale_y)
+        scaled_layer['width'] = int(layer.get('width', 100) * scale_x)
+        scaled_layer['height'] = int(layer.get('height', 100) * scale_y)
+        scaled_layer['fontSize'] = int(layer.get('fontSize', 30) * scale_x)
+        
+        render_layer(img, scaled_layer, w, h, progress, animation_style)
+    
+    return img
+
+
+# =============================================================================
 # VIDEO GENERATION
-# --------------------------------------------------------
-def build_video(product, specs, price, fmt="TikTok / Reels (9:16)"):
-    frames = []
-    bar = st.progress(0)
-    for i in range(TOTAL_FRAMES):
-        frames.append(np.asarray(draw_frame(i/FPS, product, specs, price, fmt)))
-        bar.progress((i+1)/TOTAL_FRAMES)
+# =============================================================================
+
+def create_video(frames, fps=30, output_path=None):
+    """
+    Create MP4 video from PIL frames.
+    """
+    if output_path is None:
+        output_path = tempfile.mktemp(suffix='.mp4')
     
-    clip = ImageSequenceClip(frames, fps=FPS)
-    audio_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-    requests.get(AUDIO_URL).content  # Simplified audio
-    clip.write_videofile(audio_path.name.replace('.mp3', '.mp4'),
-                        codec="libx264", audio_codec="aac",
-                        temp_audiofile='temp-audio.m4a',
-                        remove_temp=True)
-    return audio_path.name.replace('.mp3', '.mp4')
-
-# --------------------------------------------------------
-# STREAMLIT UI
-# --------------------------------------------------------
-st.title("📱 TrippleK Dynamic Ad Generator")
-st.caption("✅ Dynamic layout • ✅ Auto text boxes • ✅ Multi-format")
-
-with st.sidebar:
-    product = st.text_input("Phone Name", "iPhone 16e")
-    price   = st.text_input("Price", "KSh 145,000")
-    format_choice = st.selectbox("📱 Format", list(FORMAT_SIZES.keys()), index=0)
+    # Convert PIL images to numpy arrays
+    np_frames = [np.array(frame.convert('RGB')) for frame in frames]
     
-    if st.button("🚀 Generate MP4", type="primary"):
-        with st.spinner("Rendering..."):
-            path = build_video(product, "", price, format_choice)
-        st.success("✅ Ready!")
-        st.video(path)
-        with open(path, "rb") as f:
-            st.download_button("⬇️ Download", f, 
-                             f"TrippleK_{format_choice.replace(' ','_')}.mp4")
+    # Create video clip
+    clip = ImageClip(np_frames[0], duration=1/fps)
+    clips = [ImageClip(frame, duration=1/fps) for frame in np_frames]
+    
+    video = concatenate_videoclips(clips, method="compose")
+    video.write_videofile(
+        output_path,
+        fps=fps,
+        codec='libx264',
+        audio=False,
+        preset='medium',
+        threads=4
+    )
+    video.close()
+    
+    return output_path
 
-# Live preview
-if product:
-    preview = draw_frame(1.0, product, "", price, format_choice)
-    st.image(preview, use_column_width=True)
+
+# =============================================================================
+# UI COMPONENTS
+# =============================================================================
+
+def render_sidebar():
+    """Render sidebar controls."""
+    with st.sidebar:
+        st.title("⚙️ Export Settings")
+        
+        # Output format
+        output_format = st.selectbox(
+            "Output Format",
+            ["Image (PNG)", "Video (MP4)", "Both"],
+            index=2
+        )
+        
+        # Scale settings
+        st.subheader("Resolution")
+        scale = st.slider(
+            "Output Scale",
+            min_value=0.25,
+            max_value=2.0,
+            value=1.0,
+            step=0.25,
+            help="Scale the output resolution. 0.5 = half size (faster), 1.0 = original, 2.0 = 2x (slower)"
+        )
+        
+        settings = {'format': output_format, 'scale': scale}
+        
+        # Video settings
+        if "Video" in output_format or output_format == "Both":
+            st.subheader("Video Settings")
+            settings['duration'] = st.slider("Duration (s)", 1, 10, 3)
+            settings['fps'] = st.selectbox("FPS", [24, 30, 60], index=1)
+            settings['animation'] = st.selectbox(
+                "Animation Style",
+                ["none", "fade", "slide_up", "zoom", "typewriter", "stagger"],
+                index=1,
+                help="none: Static, fade: Fade in, slide_up: Slide from bottom, zoom: Scale up, typewriter: Text reveal, stagger: Layered entrance"
+            )
+        
+        # Image settings
+        if "Image" in output_format or output_format == "Both":
+            st.subheader("Image Settings")
+            settings['quality'] = st.slider("PNG Quality", 1, 100, 95)
+        
+        return settings
+
+
+def render_input_section():
+    """Handle JSON input methods."""
+    st.header("📥 Design Input")
+    
+    tab1, tab2 = st.tabs(["📋 Paste JSON", "📁 Upload File"])
+    
+    json_data = None
+    
+    with tab1:
+        json_text = st.text_area(
+            "Paste Polotno JSON:",
+            height=300,
+            placeholder='{"width": 1080, "height": 1080, "layers": [...]}'
+        )
+        if json_text:
+            try:
+                json_data = json.loads(json_text)
+                st.success(f"✅ Loaded: {json_data.get('name', 'Untitled')}")
+            except json.JSONDecodeError as e:
+                st.error(f"❌ Invalid JSON: {e}")
+    
+    with tab2:
+        uploaded = st.file_uploader("Upload .json file", type=['json'])
+        if uploaded:
+            try:
+                json_data = json.load(uploaded)
+                st.success(f"✅ Loaded: {json_data.get('name', 'Untitled')}")
+            except Exception as e:
+                st.error(f"❌ Error: {e}")
+    
+    return json_data
+
+
+# =============================================================================
+# MAIN APP
+# =============================================================================
+
+def main():
+    st.title("🎨 Polotno Studio Renderer")
+    st.caption("Convert Polotno JSON designs to high-quality images and videos")
+    
+    # Sidebar settings
+    settings = render_sidebar()
+    
+    # Input section
+    json_data = render_input_section()
+    
+    if not json_data:
+        st.info("👆 Upload or paste a Polotno JSON to get started")
+        return
+    
+    # Validate JSON structure
+    if 'layers' not in json_data:
+        st.error("❌ Invalid Polotno JSON: missing 'layers' array")
+        return
+    
+    # Show layer summary
+    with st.expander(f"📊 Design Info ({len(json_data.get('layers', []))} layers)"):
+        cols = st.columns(3)
+        cols[0].metric("Width", json_data.get('width', 1080))
+        cols[1].metric("Height", json_data.get('height', 1080))
+        cols[2].metric("Layers", len(json_data.get('layers', [])))
+        
+        st.json({k: v for k, v in json_data.items() if k != 'layers'})
+        
+        st.write("**Layers:**")
+        for i, layer in enumerate(json_data.get('layers', [])):
+            st.text(f"{i+1}. {layer.get('type', 'unknown')} - {layer.get('id', 'no-id')}")
+    
+    # Live preview (fast, low-res)
+    st.header("🖼️ Live Preview")
+    
+    preview_col, controls_col = st.columns([2, 1])
+    
+    with preview_col:
+        # Generate quick preview at 0.5x for speed
+        try:
+            preview_img = render_frame(json_data, scale=0.5)
+            st.image(preview_img, use_column_width=True, caption="Preview (50% scale)")
+        except Exception as e:
+            st.error(f"Preview error: {e}")
+    
+    with controls_col:
+        st.subheader("Quick Actions")
+        
+        if st.button("🔄 Refresh Preview", use_container_width=True):
+            st.rerun()
+        
+        st.divider()
+        st.markdown("""
+        **Tips:**
+        - Use 0.5x scale for faster preview
+        - Images are cached for 1 hour
+        - Video generation may take time
+        """)
+    
+    # Generation section
+    st.header("🚀 Generate Export")
+    
+    if st.button("⚡ Start Generation", type="primary", use_container_width=True):
+        
+        fmt = settings['format']
+        scale = settings['scale']
+        
+        # Calculate output dimensions
+        orig_w = json_data.get('width', 1080)
+        orig_h = json_data.get('height', 1080)
+        out_w = int(orig_w * scale)
+        out_h = int(orig_h * scale)
+        
+        st.info(f"Output size: {out_w}x{out_h}")
+        
+        # Create columns for outputs
+        if fmt == "Both":
+            img_col, vid_col = st.columns(2)
+        else:
+            img_col = vid_col = st.container()
+        
+        # Generate Image
+        if "Image" in fmt or fmt == "Both":
+            with img_col:
+                st.subheader("🖼️ Image Export")
+                
+                with st.spinner("Rendering image..."):
+                    try:
+                        final_img = render_frame(json_data, scale=scale)
+                        
+                        # Convert to RGB for display
+                        display_img = final_img.convert('RGB')
+                        st.image(display_img, use_column_width=True)
+                        
+                        # Prepare download
+                        buf = BytesIO()
+                        display_img.save(
+                            buf, 
+                            format='PNG', 
+                            quality=settings.get('quality', 95),
+                            optimize=True
+                        )
+                        buf.seek(0)
+                        
+                        st.download_button(
+                            label=f"⬇️ Download PNG ({out_w}x{out_h})",
+                            data=buf,
+                            file_name=f"{json_data.get('name', 'design')}_{out_w}x{out_h}.png",
+                            mime="image/png",
+                            use_container_width=True
+                        )
+                        
+                    except Exception as e:
+                        st.error(f"Image generation failed: {e}")
+        
+        # Generate Video
+        if "Video" in fmt or fmt == "Both":
+            with vid_col:
+                st.subheader("🎬 Video Export")
+                
+                duration = settings.get('duration', 3)
+                fps = settings.get('fps', 30)
+                animation = settings.get('animation', 'fade')
+                total_frames = int(duration * fps)
+                
+                # Progress tracking
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                frames = []
+                
+                try:
+                    for i in range(total_frames):
+                        # Update progress
+                        pct = (i + 1) / total_frames
+                        progress_bar.progress(pct, text=f"Frame {i+1}/{total_frames}")
+                        status_text.text(f"Rendering frame {i+1}/{total_frames} ({int(pct*100)}%)")
+                        
+                        # Calculate animation progress
+                        if animation == "stagger":
+                            # Each layer animates with delay
+                            frame = render_frame(json_data, progress=pct, scale=scale, animation_style="fade")
+                        else:
+                            frame = render_frame(json_data, progress=pct, scale=scale, animation_style=animation)
+                        
+                        frames.append(frame)
+                    
+                    status_text.text("💾 Compiling video...")
+                    
+                    # Create video
+                    with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp:
+                        video_path = create_video(frames, fps, tmp.name)
+                        
+                        with open(video_path, 'rb') as f:
+                            video_bytes = f.read()
+                        
+                        st.video(video_bytes)
+                        
+                        st.download_button(
+                            label=f"⬇️ Download MP4 ({duration}s @ {fps}fps)",
+                            data=video_bytes,
+                            file_name=f"{json_data.get('name', 'design')}_{out_w}x{out_h}.mp4",
+                            mime="video/mp4",
+                            use_container_width=True
+                        )
+                        
+                        # Cleanup
+                        os.unlink(video_path)
+                    
+                    progress_bar.empty()
+                    status_text.success("✅ Complete!")
+                    
+                except Exception as e:
+                    progress_bar.empty()
+                    status_text.error(f"Video generation failed: {e}")
+                    raise e
+
+
+if __name__ == "__main__":
+    main()
